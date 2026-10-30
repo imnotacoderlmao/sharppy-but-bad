@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <memory>
 // Exact C++ ports of SHARPpy's sharptab thermodynamics: fast_thermo.py scalar kernels,
 // the interp.* log-pressure interpolation, params.DefineParcel / parcelx / cape / temp_lvl / mean_*.
 // NaN is used for "masked" values, as in the numba kernels.
@@ -36,6 +38,7 @@ struct Env {
     size_t sfc = 0;
     double sfc_pres = NaN, sfc_hght = NaN;
     std::vector<double> lp_h, v_h, lp_t, v_t, lp_d, v_d, lp_v, v_v, hh_valid, lp_hh;
+    uint64_t gen = 0;      // unique per constructed Env: memo tables key on it
     explicit Env(const Profile& prof);
     double hght_at(double p) const;
     double temp_at(double p) const;
@@ -45,6 +48,10 @@ struct Env {
     double to_agl(double h) const { return h - sfc_hght; }
     double to_msl(double h) const { return h + sfc_hght; }
 };
+
+// Env built from `prof`, reused while the profile's pres/temp/dwpt/hght are bit-identical to the last call on this thread.
+// One recompute builds the same Env a dozen times (thermo indices, winds, severe params, ...); this builds it once.
+std::shared_ptr<const Env> env_for(const Profile& prof);
 
 struct Parcel {
     double pres = NaN, tmpc = NaN, dwpc = NaN;

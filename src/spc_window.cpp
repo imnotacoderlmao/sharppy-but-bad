@@ -690,14 +690,14 @@ bool SPCWindow::loadSoundingFile(const std::string& path) {
         return true;
     }
 
-    {// CM1 input_sounding (cm12snd)
+    {   // CM1 input_sounding (cm12snd)
         Profile cm1;
         if (read_cm1(path, cm1)) {
             m_origProfile = m_prof = cm1;
             const QString base = QFileInfo(QString::fromStdString(path)).fileName();
             m_currentTitle = "CM1 " + base.toStdString();
             m_modified = false;
-            refreshTitle();
+        refreshTitle();
             m_hasCustomStorm = false;
             applyHemisphere();
             recomputeAll();
@@ -776,7 +776,7 @@ void SPCWindow::recomputeAll() {
     // effective inflow layer parcel (profile.get_parcels): sfc parcel when there is no layer
     m_eff = m_sb;
     if (m_inflow.bot_p != MISSING && m_inflow.top_p != MISSING) {
-        tab::Env env(m_prof);
+        const auto env_hold_ = tab::env_for(m_prof); const tab::Env& env = *env_hold_;
         double mtha = tab::mean_theta_exact(env, m_inflow.bot_p, m_inflow.top_p);
         double mmr = tab::mean_mixratio_exact(env, m_inflow.bot_p, m_inflow.top_p);
         double effpres = (m_inflow.bot_p + m_inflow.top_p) / 2.;

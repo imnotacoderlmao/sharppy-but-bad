@@ -70,7 +70,7 @@ void SlinkyWidget::computeTrajectory() {
     const double smu = m_useLeft ? m_srwind.left_mover.u : m_srwind.right_mover.u;
     const double smv = m_useLeft ? m_srwind.left_mover.v : m_srwind.right_mover.v;
 
-    tab::Env env(m_prof);
+    const auto env_hold_ = tab::env_for(m_prof); const tab::Env& env = *env_hold_;
     tab::Parcel pcl = tab::parcelx(env, m_pcl.start_p, m_pcl.start_t, m_pcl.start_dp);
     if (!(pcl.bplus >= 1e-3)) return;                       // no positively buoyant area -> masked / NaN tilt
     m_hasEl = std::isfinite(pcl.elhght);

@@ -68,7 +68,7 @@ double convective_temp(const Env& e) {                                    // par
 
 double lapse_rate_exact(const Profile& prof, double lower, double upper, bool pres) {
     if (prof.size() < 2) return NaN;
-    Env e(prof);
+    const auto e_hold_ = env_for(prof); const Env& e = *e_hold_;
     double p1, p2, z1, z2;
     if (pres) {
         if (e.pres.back() > upper) return NaN;
@@ -85,7 +85,7 @@ ThermoIndices compute_thermo_indices(const Profile& prof, int pwv_flag) {
     ThermoIndices o;
     o.pwv_flag = pwv_flag;
     if (prof.size() < 2) return o;
-    Env e(prof);
+    const auto e_hold_ = env_for(prof); const Env& e = *e_hold_;
     const double sfc = e.sfc_pres;
 
     LPL ls = define_sfc(e), lm = define_ml(e), lu = define_mu(e, 300.);
@@ -235,10 +235,20 @@ double haines_term(const Env& e, double p1, double p2, double pd, bool dd_from_p
 }
 }
 
+
+static double pbl_top_pres(const Env& e) {                                   // params.pbl_top
+    const size_t n = e.pres.size(), s = e.sfc;
+    std::vector<double> tv(n);
+    for (size_t i = 0; i < n; ++i) tv[i] = theta(e.pres[i], virtemp(e.pres[i], e.tmpc[i], e.dwpc[i]));
+    size_t level = n - 1;
+    for (size_t i = 0; i < n; ++i) if (tv[s] + .5 < tv[i]) { level = i; break; }
+    return e.pres[level];
+}
+
 FireData compute_fire(const Profile& prof) {
     FireData f;
     if (prof.empty()) return f;
-    Env e(prof);
+    const auto e_hold_ = env_for(prof); const Env& e = *e_hold_;
     const size_t s = e.sfc;
     // fire.fosberg
     {
@@ -258,16 +268,7 @@ FireData compute_fire(const Profile& prof) {
     f.haines[1] = haines_term(e, 850, 700, 850, false, 6, 10, 6, 12);
     f.haines[2] = haines_term(e, 700, 500, 700, false, 18, 21, 15, 20);
 
-    // params.pbl_top
-    double ppbl = NaN;
-    {
-        const size_t n = e.pres.size();
-        std::vector<double> tv(n);
-        for (size_t i = 0; i < n; ++i) tv[i] = theta(e.pres[i], virtemp(e.pres[i], e.tmpc[i], e.dwpc[i]));
-        size_t level = n - 1;
-        for (size_t i = 0; i < n; ++i) if (tv[s] + .5 < tv[i]) { level = i; break; }
-        ppbl = e.pres[level];
-    }
+    const double ppbl = pbl_top_pres(e);
     const double psfc = e.pres[s];
     f.sfc_rh = relh(psfc, e.tmpc[s], e.dwpc[s]);
     const double p1km = e.pres_at_hght(e.to_msl(1000.));

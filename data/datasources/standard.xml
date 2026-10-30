@@ -87,6 +87,10 @@
         </outlet>
     </datasource>
     <datasource name="Observed" ensemble="false" observed="true">
+        <outlet name="UWyo BUFR" url="https://weather.uwyo.edu/wsgi/sounding?datetime={year}-{month}-{day}%20{cycle}:00:00&amp;id={srcid}&amp;src=BUFR&amp;type=TEXT:LIST" format="uwyo" >
+            <time first="0" range="0" delta="0" offset="0" delay="2" cycle="3" archive="168" start="1973/01/01" end="now"/>
+            <points csv="uwyo.csv" />
+        </outlet>
         <outlet name="SPC" url="https://www.spc.noaa.gov/exper/soundings/{date}{cycle}_OBS/{srcid}.txt" format="spc" >
             <time first="0" range="0" delta="0" offset="0" delay="1" cycle="12" archive="168" start="-" end="-"/>
             <points csv="spc_ua.csv" />
@@ -96,10 +100,6 @@
             <points csv="sharp.csv" />
         </outlet>
         <outlet name="UWyo" url="https://weather.uwyo.edu/wsgi/sounding?datetime={year}-{month}-{day}%20{cycle}:00:00&amp;id={srcid}&amp;src=UNKNOWN&amp;type=TEXT:LIST" format="uwyo" >
-            <time first="0" range="0" delta="0" offset="0" delay="2" cycle="3" archive="168" start="1973/01/01" end="now"/>
-            <points csv="uwyo.csv" />
-        </outlet>
-        <outlet name="UWyo BUFR" url="https://weather.uwyo.edu/wsgi/sounding?datetime={year}-{month}-{day}%20{cycle}:00:00&amp;id={srcid}&amp;src=BUFR&amp;type=TEXT:LIST" format="uwyo" >
             <time first="0" range="0" delta="0" offset="0" delay="2" cycle="3" archive="168" start="1973/01/01" end="now"/>
             <points csv="uwyo.csv" />
         </outlet>

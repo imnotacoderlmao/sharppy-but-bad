@@ -111,7 +111,7 @@ static void shear_p(const Profile& prof, double pbot, double ptop, double& du, d
 BunkersMotion bunkers_storm_motion(const Profile& prof) {
     BunkersMotion res;
     if (prof.size() > 1) {   // params.bunkers_storm_motion (parcel based, effective inflow base)
-        tab::Env env(prof);
+        const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
         tab::LPL l = tab::define_mu(env);
         tab::Parcel mu = tab::parcelx(env, l.pres, env.temp_at(l.pres), env.dwpt_at(l.pres));
         double pb, pt; tab::effective_inflow(env, mu.bplus, mu.bminus, pb, pt);
@@ -163,7 +163,7 @@ CorfidiMotion corfidi_mcs_motion(const Profile& prof) {
 InflowLayer effective_inflow_layer(const Profile& prof, double storm_u, double storm_v) {
     InflowLayer layer;
     if (prof.size() < 2) return layer;
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     tab::Parcel mu = tab::parcelx(env, tab::define_mu(env).pres, env.temp_at(tab::define_mu(env).pres), env.dwpt_at(tab::define_mu(env).pres));
     double pb, pt;
     tab::effective_inflow(env, mu.bplus, mu.bminus, pb, pt);

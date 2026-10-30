@@ -179,7 +179,7 @@ SarsAll compute_sars(const Profile& prof, const ParcelResult& mu, const ParcelRe
     const double s6 = shearMs(6000), s3 = shearMs(3000), s9 = shearMs(9000);
     const double h500t = prof.temp_at_pres(500.);
 
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     double lr = std::nan("");
     {   // params.lapse_rate(prof, 700, 500, pres=True)
         double z1 = env.hght_at(700.), z2 = env.hght_at(500.);

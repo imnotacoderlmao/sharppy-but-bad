@@ -180,7 +180,7 @@ bool DsOutlet::customAvail() const {
     if (o == "psu") return psu.contains(d);
     if (o == "iem") return iem.contains(d);
     if (o == "sharp") return d == "observed" || d == "ncar ensemble" || d == "goes";
-    if (o.startsWith("uwyo")) return d == "observed";
+    if (o.startsWith("uwyo")) return d.startsWith("observed");
     return false;
 }
 
@@ -232,7 +232,7 @@ QVector<QDateTime> DsOutlet::availableTimes(const QDate& dt, const QDateTime& no
     if (!useFallback) {
         if (o == "iem") {
             times = iemTimes(d, dt, nowUtc);
-        } else if ((o == "sharp" || o.startsWith("uwyo")) && d == "observed") {
+        } else if ((o == "sharp" && d == "observed") || (o.startsWith("uwyo") && d.startsWith("observed"))) {
             // The Python scrapes the OU archive index. Offline we assume the standard
             // synoptic launches exist for every archived day (03/15Z before May 1957).
             if (!dt.isValid()) {

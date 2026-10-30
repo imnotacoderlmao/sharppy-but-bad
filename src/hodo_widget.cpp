@@ -187,7 +187,7 @@ void HodoWidget::setProfile(const Profile& prof, const BunkersMotion& bunkers) {
     m_prof = prof; m_hasData = !prof.empty();
     m_bunkers = bunkers; m_srwind = bunkers;
     if (m_hasData) {
-        tab::Env env(prof);
+        const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
         tab::LPL l = tab::define_mu(env);
         m_mu = ParcelResult();
         tab::Parcel pc = tab::parcelx(env, l.pres, env.temp_at(l.pres), env.dwpt_at(l.pres));

@@ -134,7 +134,7 @@ double k_index(const Profile& prof) {
 
 double dcape(const Profile& prof) {
     if (prof.size() < 2) return 0.0;
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     double d = tab::dcape(env);
     return std::isfinite(d) ? d : 0.0;
 }
@@ -170,31 +170,31 @@ static ParcelResult from_tab(const Profile& prof, const tab::Env& env, const tab
 
 ParcelResult lift_parcel(const Profile& prof, double p, double t, double dp, bool keep_trajectory) {
     if (prof.empty()) return {};
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     return from_tab(prof, env, tab::LPL{p, t, dp}, keep_trajectory);
 }
 
 ParcelResult surface_parcel(const Profile& prof) {
     if (prof.empty()) return {};
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     return from_tab(prof, env, tab::define_sfc(env), true);
 }
 
 ParcelResult mixed_layer_parcel(const Profile& prof, double ml_depth_hpa) {
     if (prof.empty()) return {};
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     return from_tab(prof, env, tab::define_ml(env, ml_depth_hpa), true);
 }
 
 ParcelResult most_unstable_parcel(const Profile& prof, double search_depth_hpa) {
     if (prof.empty()) return {};
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     return from_tab(prof, env, tab::define_mu(env, search_depth_hpa), true);
 }
 
 ParcelResult forecast_parcel(const Profile& prof) {
     if (prof.empty()) return {};
-    tab::Env env(prof);
+    const auto env_hold_ = tab::env_for(prof); const tab::Env& env = *env_hold_;
     return from_tab(prof, env, tab::define_fcst(env), true);
 }
 

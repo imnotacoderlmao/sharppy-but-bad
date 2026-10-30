@@ -1,6 +1,11 @@
 #include "sharppy/tab.hpp"
 #include "sharppy/constants.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <memory>
+#include <tuple>
+#include <map>
 
 namespace sharppy { namespace tab {
 
@@ -108,7 +113,23 @@ static double interp1(double q, const std::vector<double>& x, const std::vector<
 }
 static double fix(double v) { return (v == MISSING || !std::isfinite(v)) ? NaN : v; }
 
-Env::Env(const Profile& prof) {
+static uint64_t next_env_gen() { static std::atomic<uint64_t> g{1}; return g++; }
+
+std::shared_ptr<const Env> env_for(const Profile& prof) {
+    struct Entry { std::vector<double> pres, temp, dwpt, hght; std::shared_ptr<const Env> env; };
+    static thread_local Entry c;
+    const size_t n = prof.size();
+    auto same = [&](const std::vector<double>& a, const std::vector<double>& b) {
+        return a.size() == b.size() && (n == 0 || std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
+    };
+    if (c.env && same(c.pres, prof.pres) && same(c.temp, prof.temp) && same(c.dwpt, prof.dwpt) && same(c.hght, prof.hght))
+        return c.env;
+    c.pres = prof.pres; c.temp = prof.temp; c.dwpt = prof.dwpt; c.hght = prof.hght;
+    c.env = std::make_shared<const Env>(prof);
+    return c.env;
+}
+
+Env::Env(const Profile& prof) : gen(next_env_gen()) {
     const size_t n = prof.size();
     pres.resize(n); tmpc.resize(n); dwpc.resize(n); hght.resize(n); vtmp.resize(n);
     for (size_t i = 0; i < n; ++i) {
@@ -276,15 +297,17 @@ void cape_only(const Env& e, double pres, double tmpc, double dwpc, double pbot,
     double thetam = thta_lcl - wobf(thta_lcl) + wobf(tp1);
 
     double totp = 0, lyre = 0, totn2 = 0; bool truncated = false;
+    double vt1 = virtemp(pe1, tp1, tp1);              // virtemp of the previous level's parcel: tdef1 of this level == tdef2 of the last
     for (size_t i = lptr; i < n; ++i) {
         if (isn(e.tmpc[i])) continue;
         double pe2i = e.pres[i], h2 = e.hght[i], te2 = e.vtmp[i];
         double tpi = satlift(pe2i, thetam);
-        double tdef1 = (virtemp(pe1, tp1, tp1) - te1) / (te1 + ZEROCNK);
-        double tdef2 = (virtemp(pe2i, tpi, tpi) - te2) / (te2 + ZEROCNK);
+        double tdef1 = (vt1 - te1) / (te1 + ZEROCNK);
+        const double vt2 = virtemp(pe2i, tpi, tpi);
+        double tdef2 = (vt2 - te2) / (te2 + ZEROCNK);
         lyre = G * (tdef1 + tdef2) / 2. * (h2 - h1);
         if (lyre > 0) totp += lyre; else if (pe2i > 500.) totn2 += lyre;
-        pe1 = pe2i; h1 = h2; te1 = te2; tp1 = tpi;
+        pe1 = pe2i; h1 = h2; te1 = te2; tp1 = tpi; vt1 = vt2;
         if ((trunc && pe2i <= 500.) || (i >= uptr)) { truncated = true; break; }
     }
     totn += totn2;
@@ -519,7 +542,23 @@ Parcel parcelx(const Env& e, double pres, double tmpc, double dwpc, double pbot,
 }
 
 
+static void effective_inflow_impl(const Env& e, double mucape, double mucinh, double& pbot, double& ptop, double ecape, double ecinh);
+
+// The effective inflow search lifts a parcel from every level and is by far the most expensive step of a recompute;
+// bunkers_storm_motion and effective_inflow_layer both ask for it on the same sounding, so the last answer is kept.
 void effective_inflow(const Env& e, double mucape, double mucinh, double& pbot, double& ptop, double ecape, double ecinh) {
+    struct Key { uint64_t gen; double a, b, c, d; };
+    struct Memo { Key k{0, 0, 0, 0, 0}; double pb = NaN, pt = NaN; bool ok = false; };
+    static thread_local Memo m;
+    auto bits = [](double x) { uint64_t u; std::memcpy(&u, &x, 8); return u; };
+    const bool hit = m.ok && m.k.gen == e.gen && bits(m.k.a) == bits(mucape) && bits(m.k.b) == bits(mucinh) &&
+                     bits(m.k.c) == bits(ecape) && bits(m.k.d) == bits(ecinh);
+    if (hit) { pbot = m.pb; ptop = m.pt; return; }
+    effective_inflow_impl(e, mucape, mucinh, pbot, ptop, ecape, ecinh);
+    m.k = Key{e.gen, mucape, mucinh, ecape, ecinh}; m.pb = pbot; m.pt = ptop; m.ok = true;
+}
+
+static void effective_inflow_impl(const Env& e, double mucape, double mucinh, double& pbot, double& ptop, double ecape, double ecinh) {
     pbot = NaN; ptop = NaN;
     if (isn(mucape) || mucape == 0 || !(mucape >= ecape && mucinh > ecinh)) return;
     const size_t n = e.pres.size();
@@ -590,8 +629,10 @@ double dcape(const Env& e, std::vector<double>* ptr_out, std::vector<double>* tt
         tts.push_back(tp2); pps.push_back(pe2);
         pe1 = pe2; te1 = te2; h1 = h2; tp1 = tp2;
     }
-    if (ptr_out) { *ptr_out = pp; ptr_out->insert(ptr_out->end(), pps.rbegin(), pps.rend()); }
-    if (ttr_out) { *ttr_out = tt; ttr_out->insert(ttr_out->end(), tts.rbegin(), tts.rend()); }
+    // Python fills ttraces[i] for i = uptr..0 (so the array runs surface -> top) and appends ttraces[::-1] (top -> surface).
+    // tts/pps are already pushed top -> surface, so they go in as they are; reversing them drew the trace down and back up.
+    if (ptr_out) { *ptr_out = pp; ptr_out->insert(ptr_out->end(), pps.begin(), pps.end()); }
+    if (ttr_out) { *ttr_out = tt; ttr_out->insert(ttr_out->end(), tts.begin(), tts.end()); }
     return tote;
 }
 

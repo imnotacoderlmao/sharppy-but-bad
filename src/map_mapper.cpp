@@ -1,5 +1,7 @@
 #include "sharppy/map_mapper.hpp"
 
+#include "sharppy/db_pack.hpp"
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -182,8 +184,13 @@ Mapper::ProjLines Mapper::loadDat(const QString& name, const QString& res) const
     const MapProj projs[] = {MapProj::NPStere, MapProj::Merc, MapProj::SPStere};
     for (MapProj p : projs) out[p] = {};
 
+    // A folder named by SHARPPY_SHAPEFILES / setDataDir() or found next to the program wins; otherwise the files come
+    // from the data pack (shapefiles/...), so a bare install with only data.dbpack still draws maps.
     const QString dir = dataDir();
-    if (dir.isEmpty()) return out;
+    auto readShape = [&](const QString& file) -> QByteArray {
+        if (!dir.isEmpty()) { QFile f(dir + "/" + file); if (f.open(QIODevice::ReadOnly)) return f.readAll(); }
+        return data_read("shapefiles/" + file);
+    };
 
     // Prefer the resolution SHARPpy asks for, but fall back to what's installed.
     QStringList order;
@@ -191,15 +198,16 @@ Mapper::ProjLines Mapper::loadDat(const QString& name, const QString& res) const
     for (const char* r : {"h", "i", "l", "c"}) if (res != r) order << r;
     if (res == "f") order = QStringList{"f", "h", "i", "l", "c"};
 
-    QString datPath, metaPath;
+    QByteArray datBytes, metaBytes;
     for (const QString& r : order) {
-        QString d = dir + "/" + name + "_" + r + ".dat";
-        QString m = dir + "/" + name + "meta_" + r + ".dat";
-        if (QFileInfo(d).exists() && QFileInfo(m).exists()) { datPath = d; metaPath = m; break; }
+        datBytes = readShape(name + "_" + r + ".dat");
+        if (datBytes.isEmpty()) continue;
+        metaBytes = readShape(name + "meta_" + r + ".dat");
+        if (!metaBytes.isEmpty()) break;
     }
-    if (datPath.isEmpty()) return out;
+    if (datBytes.isEmpty() || metaBytes.isEmpty()) return out;
 
-    QFile bdat(datPath), bmeta(metaPath);
+    QBuffer bdat(&datBytes), bmeta(&metaBytes);
     if (!bdat.open(QIODevice::ReadOnly) || !bmeta.open(QIODevice::ReadOnly | QIODevice::Text)) return out;
     const qint64 fileSize = bdat.size();
 

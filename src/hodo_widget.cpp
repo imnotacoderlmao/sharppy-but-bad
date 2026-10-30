@@ -470,8 +470,9 @@ void HodoWidget::mouseMoveEvent(QMouseEvent* e) {
         update();
     } else if (m_dragKind) {
         m_dragPos = e->pos();
-        if (m_live && m_cursor == Cursor::None && m_liveClock.elapsed() >= 16) {
+        if (m_live && m_cursor == Cursor::None && m_liveClock.elapsed() >= m_liveInterval) {
             m_liveClock.restart();
+            QElapsedTimer cost; cost.start();
             double u, v; pixToUv(m_dragPos.x(), m_dragPos.y(), u, v);
             if (m_dragKind == 1) {
                 long pi = (m_dragIdx >= 0 && m_dragIdx < (long)m_vtx.size()) ? m_vtx[m_dragIdx].prof_idx : -1;
@@ -485,6 +486,8 @@ void HodoWidget::mouseMoveEvent(QMouseEvent* e) {
                 m_liveSent = true;
                 emit vectorModified(m_dragKind == 3, u, v);
             }
+            // pace the next live update to what this machine can afford (recompute + repaint ~ 3.5x the recompute)
+            m_liveInterval = std::max<qint64>(16, std::min<qint64>(250, (qint64)(3.5 * cost.nsecsElapsed() / 1e6)));
         }
         update();
     }

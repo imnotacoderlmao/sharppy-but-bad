@@ -1,5 +1,5 @@
 #include "sharppy/datasource.hpp"
-#include "sharppy/sars_archive.hpp"
+#include "sharppy/db_pack.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -477,14 +477,14 @@ QString findDataSourceDir() {
 DataSourceSet loadDataSources(const QString& dirIn) {
     DataSourceSet set;
     set.dir = dirIn.isEmpty() ? findDataSourceDir() : dirIn;
-    // Datasource files may also live inside sars.sarspack (entry type 2); loose files win so they can be edited.
-    const QString pack = sarspack_find(2);
-    const QStringList packed = pack.isEmpty() ? QStringList() : sarspack_list(pack, 2);
+    // Datasource files may also live inside the data pack (datasources/ entries); loose files win so they can be edited.
+    const QString pack = dbpack_find();
+    const QStringList packed = pack.isEmpty() ? QStringList() : dbpack_list(pack, "datasources");
     if (set.dir.isEmpty() && !packed.isEmpty()) set.dir = pack;
     auto readAsset = [&](const QString& name) -> QByteArray {
         QFile lf(QDir(set.dir).absoluteFilePath(name));
         if (set.dir != pack && lf.open(QIODevice::ReadOnly)) return lf.readAll();
-        return packed.contains(name) ? sarspack_read(pack, 2, name) : QByteArray();
+        return packed.contains(name) ? dbpack_read(pack, "datasources/" + name) : QByteArray();
     };
     if (set.dir.isEmpty()) {
         set.warnings << "No datasource folder found (looked for data/datasources next to the program, "

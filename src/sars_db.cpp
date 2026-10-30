@@ -1,11 +1,16 @@
 #include "sharppy/sars_db.hpp"
 #include "sharppy/tab.hpp"
+#include "sharppy/db_pack.hpp"
 #include <QCoreApplication>
 #include <QFile>
 #include <QTextStream>
 #include <QStringList>
 #include <cmath>
 #include <algorithm>
+#include <map>
+#include <mutex>
+#include <QFileInfo>
+#include <QDateTime>
 
 namespace sharppy {
 
@@ -14,23 +19,45 @@ constexpr double KTS2MS = 0.514444;
 constexpr double MS2KTS = 1.94384;
 
 // np.loadtxt(skiprows=1, dtype=bytes, comments=...)
-bool loadTable(const std::string& fn, const QString& comment, std::vector<std::vector<std::string>>& rows) {
-    QFile f(QString::fromStdString(fn));
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
-    QTextStream ts(&f);
+// Parsed once and kept: the SARS panel is recomputed on every live-drag step, and re-reading + splitting ~2000 text rows
+// each time made it ~75% of the whole recompute. The cache is refreshed when the file changes on disk.
+struct Table {
+    std::vector<std::vector<std::string>> rows;
+    std::vector<std::vector<double>> nums;
+    qint64 mtime = -1, size = -1;
+};
+
+const Table* getTable(const std::string& fn, const QString& comment) {
+    static std::map<std::pair<std::string, QString>, Table> cache;
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lock(mu);
+    const QFileInfo fi(QString::fromStdString(fn));
+    Table& t = cache[{fn, comment}];
+    const bool loose = fi.isFile();
+    if (!t.rows.empty() && (loose ? (t.mtime == fi.lastModified().toMSecsSinceEpoch() && t.size == fi.size()) : t.mtime == 0)) return &t;
+    t = Table();
+    QByteArray bytes;
+    if (loose) { QFile f(fi.filePath()); if (!f.open(QIODevice::ReadOnly)) return nullptr; bytes = f.readAll(); }
+    else bytes = data_read("sars/" + fi.fileName());          // sars_hail.txt / sars_supercell.txt inside the data pack
+    if (bytes.isEmpty()) return nullptr;
+    QTextStream ts(bytes);
     bool first = true;
+    const QRegExp ws("\\s+");
     while (!ts.atEnd()) {
         QString line = ts.readLine();
         if (first) { first = false; continue; }
         int c = line.indexOf(comment);
         if (c >= 0) line = line.left(c);
-        QStringList t = line.split(QRegExp("\\s+"), QString::SkipEmptyParts);
-        if (t.isEmpty()) continue;
-        std::vector<std::string> r;
-        for (const QString& s : t) r.push_back(s.toStdString());
-        rows.push_back(std::move(r));
+        QStringList tk = line.split(ws, QString::SkipEmptyParts);
+        if (tk.isEmpty()) continue;
+        std::vector<std::string> r; std::vector<double> nv;
+        for (const QString& x : tk) { r.push_back(x.toStdString()); nv.push_back(x.toDouble()); }
+        t.rows.push_back(std::move(r));
+        t.nums.push_back(std::move(nv));
     }
-    return !rows.empty();
+    if (t.rows.empty()) return nullptr;
+    t.mtime = loose ? fi.lastModified().toMSecsSinceEpoch() : 0; t.size = loose ? fi.size() : bytes.size();
+    return &t;
 }
 double num(const std::vector<std::string>& r, size_t i) { return i < r.size() ? std::atof(r[i].c_str()) : std::nan(""); }
 }
@@ -42,8 +69,9 @@ std::string default_sars_dir() {
 SarsMatches sars_supercell(const std::string& dbfile, double mlcape, double mllcl, double h5temp, double lr,
                            double shr, double srh, double shr3k, double shr9k, double srh3) {
     SarsMatches out;
-    std::vector<std::vector<std::string>> db;
-    if (!loadTable(dbfile, "%%%%", db)) return out;
+    const Table* tb = getTable(dbfile, "%%%%");
+    if (!tb) return out;
+    const auto& db = tb->rows;
 
     const double range_mlcape = (mlcape == 0) ? 0 : 1300;
     const double range_mlcape_t1 = mlcape * 0.25;
@@ -57,7 +85,10 @@ SarsMatches sars_supercell(const std::string& dbfile, double mlcape, double mllc
     const double range_shr3k_t1 = 15, range_shr9k_t1 = 25;
 
     int nloose = 0, nmatch = 0;
-    for (const auto& r : db) {
+    for (size_t k = 0; k < db.size(); ++k) {
+        const auto& r = db[k];
+        const auto& nv = tb->nums[k];
+        auto num = [&](const std::vector<std::string>&, size_t i) { return i < nv.size() ? nv[i] : std::nan(""); };
         if (r.size() < 15) continue;
         double cat = num(r, 1), m_cape = num(r, 3), m_lcl = num(r, 5), m_srh = num(r, 6), m_shr = num(r, 7),
                m_h5 = num(r, 9), m_lr = num(r, 11), m_shr3 = num(r, 12), m_shr9 = num(r, 13), m_srh3 = num(r, 14);
@@ -90,8 +121,9 @@ SarsMatches sars_supercell(const std::string& dbfile, double mlcape, double mllc
 SarsMatches sars_hail(const std::string& dbfile, double mumr, double mucape, double h5_temp, double lr,
                       double shr6, double shr9, double shr3, double srh) {
     SarsMatches out;
-    std::vector<std::vector<std::string>> db;
-    if (!loadTable(dbfile, "#", db)) return out;
+    const Table* tb = getTable(dbfile, "#");
+    if (!tb) return out;
+    const auto& db = tb->rows;
 
     const double range_mumr = 2.0, range_mumr_t1 = 2.0;
     const double range_mucape = mucape * .30;
@@ -104,7 +136,10 @@ SarsMatches sars_hail(const std::string& dbfile, double mumr, double mucape, dou
     const double range_srh_t1 = srh < 50 ? 25 : srh * 0.5;
 
     int nloose = 0, nsig = 0;
-    for (const auto& r : db) {
+    for (size_t k = 0; k < db.size(); ++k) {
+        const auto& r = db[k];
+        const auto& nv = tb->nums[k];
+        auto num = [&](const std::vector<std::string>&, size_t i) { return i < nv.size() ? nv[i] : std::nan(""); };
         if (r.size() < 13) continue;
         double size = num(r, 2), m_cape = num(r, 3), m_mr = num(r, 4), m_t = num(r, 5), m_lr = num(r, 7),
                m_shr3 = num(r, 9), m_shr6 = num(r, 10), m_shr9 = num(r, 11), m_srh = num(r, 12);

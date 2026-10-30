@@ -158,7 +158,7 @@ private:
     bool m_dragTemp = false; long m_dragIdx = -1; QPoint m_clickStart, m_dragPos;
     bool m_dragging = false;
     // live editing: the profile is re-modified from the press-time copy and pushed out while dragging (throttled)
-    bool m_live = true; Profile m_dragBase; bool m_liveSent = false; QElapsedTimer m_liveClock;
+    bool m_live = true; Profile m_dragBase; bool m_liveSent = false; QElapsedTimer m_liveClock; qint64 m_liveInterval = 16;
     double m_lsP0 = 0, m_lsT0 = 0; QPoint m_lsCur;
     bool m_lsTemp = true;
 };

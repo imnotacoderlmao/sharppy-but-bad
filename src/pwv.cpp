@@ -1,4 +1,5 @@
 #include "sharppy/pwv.hpp"
+#include "sharppy/db_pack.hpp"
 #include "sharppy/thermo.hpp"
 #include "sharppy/tab.hpp"
 #include <QCoreApplication>
@@ -34,22 +35,13 @@ double precip_water(const Profile& prof, double ptop, double pbot) {
 namespace {
 using Table = QMap<QString, QVector<double>>;   // key: ICAO(upper), WMO, iata(lower)
 
-QString findFile(const QString& name) {
-    QStringList dirs;
-    QDir d(QCoreApplication::applicationDirPath());
-    for (int i = 0; i < 6; ++i) {
-        dirs << d.absoluteFilePath("data") << d.absoluteFilePath("data/sharptab") << d.absolutePath();
-        if (!d.cdUp()) break;
-    }
-    for (const QString& dir : dirs) if (QFile::exists(dir + "/" + name)) return dir + "/" + name;
-    return {};
-}
-
 Table load(const QString& name, int idIndex) {
     Table t;
-    QFile f(findFile(name));
-    if (f.fileName().isEmpty() || !f.open(QIODevice::ReadOnly | QIODevice::Text)) return t;
-    QTextStream in(&f);
+    // data/sharptab/<name> (or data/<name>) as a loose file, else from the data pack
+    QByteArray bytes = data_read("sharptab/" + name);
+    if (bytes.isEmpty()) bytes = data_read(name);
+    if (bytes.isEmpty()) return t;
+    QTextStream in(bytes);
     in.readLine();   // header
     while (!in.atEnd()) {
         QStringList c = in.readLine().split(',');

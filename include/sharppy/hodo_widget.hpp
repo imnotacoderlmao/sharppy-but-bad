@@ -135,7 +135,7 @@ private:
     // draggables
     struct Vtx { double u, v; long prof_idx; };
     std::vector<Vtx> m_vtx;                // hodograph vertices (<= 12 km, 12 km point inserted)
-    bool m_live = true; Profile m_dragBase; bool m_liveSent = false; QElapsedTimer m_liveClock;
+    bool m_live = true; Profile m_dragBase; bool m_liveSent = false; QElapsedTimer m_liveClock; qint64 m_liveInterval = 16;
     int m_dragKind = 0;                    // 0 none, 1 hodo, 2 rm, 3 lm
     long m_dragIdx = -1; QPoint m_clickStart, m_dragPos;
 };

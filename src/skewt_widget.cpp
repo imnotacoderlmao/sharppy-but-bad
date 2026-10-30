@@ -466,7 +466,7 @@ void SkewTWidget::drawBarbs(QPainter& qp) {
 void SkewTWidget::plotData(QPainter& qp) {
     if (!m_hasData || !m_env) return;
     qp.setClipRect(m_clip);
-    qp.setRenderHint(QPainter::Antialiasing);
+    qp.setRenderHint(QPainter::Antialiasing, !(m_dragging && m_liveSent));   // cheaper strokes while a live drag is running
     qp.setRenderHint(QPainter::TextAntialiasing);
     drawTitles(qp);
 
@@ -670,13 +670,16 @@ void SkewTWidget::mouseMoveEvent(QMouseEvent* e) {
             }
             x = m_dragTemp ? std::max(ox, x) : std::min(ox, x);
             m_dragPos = QPoint((int)std::lround(x), (int)std::lround(y));
-            if (m_live && m_editMode == EditMode::PointSnap && m_liveClock.elapsed() >= 16) {
+            if (m_live && m_editMode == EditMode::PointSnap && m_liveClock.elapsed() >= m_liveInterval) {
                 m_liveClock.restart();
+                QElapsedTimer cost; cost.start();
                 const double t = pixToTmpc((m_dragPos.x() - m_originx) * m_scale, (y - m_originy) * m_scale);
                 Profile live = m_dragBase;
                 ProfileModifier::modify_thermo_index(live, (size_t)m_dragIdx, t, m_dragTemp, 0);
                 m_prof = live; m_liveSent = true;
                 emit profileLive();                         // the window recomputes and calls setProfile()
+                // pace the next live update to what this machine can afford (recompute + repaint ~ 3.5x the recompute)
+                m_liveInterval = std::max<qint64>(16, std::min<qint64>(250, (qint64)(3.5 * cost.nsecsElapsed() / 1e6)));
             }
         }
     }

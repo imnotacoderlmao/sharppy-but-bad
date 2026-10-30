@@ -151,17 +151,15 @@ void ConvectiveTableWidget::drawConvectiveIndices(QPainter& qp) {
         if (std::isnan(l) || !capeOK(i) || i != m_sel) return m_fg;
         return l < 750 ? m_alert[6] : l < 1000 ? m_alert[5] : l < 1250 ? m_alert[4] : l < 2000 ? m_alert[3] : m_alert[2];
     }, [&](int i) { return rows[i].lcl; });
-    QColor lastPen = m_fg;
     column(4, [&](int i) -> QColor {
         double v = rows[i].liV;
         QColor c = m_fg;
         if (!std::isnan(v) && capeOK(i) && i == m_sel)
             c = v < -13 ? m_alert[6] : v < -10 ? m_alert[5] : v < -7 ? m_alert[4] : v < -4 ? m_alert[3] : m_alert[2];
-        lastPen = c;
         return c;
     }, [&](int i) { return rows[i].li; });
-    // LFC / EL use the pen left over from the LI loop
-    qp.setPen(QPen(lastPen, 1, Qt::SolidLine));
+    // LFC / EL: always the plain foreground color (the Python leaks the last LI pen)
+    qp.setPen(QPen(m_fg, 1, Qt::SolidLine));
     {
         double y = m_ylast + m_tpad;
         for (int i = 0; i < n; ++i) { qp.drawText(QRect((int)(x1 * 5), (int)y, (int)(x1 * 2), lh), fl, rows[i].lfc); y += m_labelHeight; }

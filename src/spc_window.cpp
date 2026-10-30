@@ -690,14 +690,14 @@ bool SPCWindow::loadSoundingFile(const std::string& path) {
         return true;
     }
 
-    {   // CM1 input_sounding (cm12snd)
+    {// CM1 input_sounding (cm12snd)
         Profile cm1;
         if (read_cm1(path, cm1)) {
             m_origProfile = m_prof = cm1;
             const QString base = QFileInfo(QString::fromStdString(path)).fileName();
             m_currentTitle = "CM1 " + base.toStdString();
             m_modified = false;
-        refreshTitle();
+            refreshTitle();
             m_hasCustomStorm = false;
             applyHemisphere();
             recomputeAll();

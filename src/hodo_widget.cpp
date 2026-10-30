@@ -25,7 +25,7 @@ static double lin(double h, const std::vector<double>& z, const std::vector<doub
     return std::nan("");
 }
 
-HodoWidget::HodoWidget(QWidget* parent) : QWidget(parent) {
+HodoWidget::HodoWidget(QWidget* parent) : CanvasBase(parent) {
     setMinimumSize(250, 250);
     setMouseTracking(true);
     initUI();
@@ -240,7 +240,11 @@ void HodoWidget::drawHodo(QPainter& qp) {
     for (size_t k = 0; k + 1 < sx.size(); ++k) {
         QPen pen(m_colors[k], 2); qp.setPen(pen);
         QPainterPath path; path.moveTo(sx[k], sy[k]);
-        for (long j = sidx[k]; j < sidx[k + 1]; ++j) path.lineTo(xx[j], yy[j]);
+        double lx = sx[k], ly = sy[k];                       // drop vertices within half a pixel of the last one (raw soundings)
+        for (long j = sidx[k]; j < sidx[k + 1]; ++j) {
+            if (std::fabs(xx[j] - lx) < 0.5 && std::fabs(yy[j] - ly) < 0.5) continue;
+            path.lineTo(xx[j], yy[j]); lx = xx[j]; ly = yy[j];
+        }
         path.lineTo(sx[k + 1], sy[k + 1]);
         qp.drawPath(path);
     }
@@ -249,7 +253,11 @@ void HodoWidget::drawHodo(QPainter& qp) {
         size_t k = sx.size() - 1;
         QPen pen(m_colors[std::min<size_t>(k, 4)], 2); qp.setPen(pen);
         QPainterPath path; path.moveTo(sx[k], sy[k]);
-        for (size_t j = (size_t)sidx[k]; j < xx.size(); ++j) path.lineTo(xx[j], yy[j]);
+        double lx = sx[k], ly = sy[k];
+        for (size_t j = (size_t)sidx[k]; j < xx.size(); ++j) {
+            if (std::fabs(xx[j] - lx) < 0.5 && std::fabs(yy[j] - ly) < 0.5) continue;
+            path.lineTo(xx[j], yy[j]); lx = xx[j]; ly = yy[j];
+        }
         qp.drawPath(path);
     }
 }
@@ -348,7 +356,7 @@ void HodoWidget::drawBoundary(QPainter& qp) {
     qp.drawText(r2, Qt::TextDontClip | Qt::AlignLeft, "9 - 11 km SR-Wind: " + i2s(d) + "/" + i2s(s) + " kts - (" + type + ")");
 }
 
-void HodoWidget::paintEvent(QPaintEvent*) {
+void HodoWidget::paintContents(QPaintEvent*) {
     QPainter qp(this);
     qp.setRenderHint(QPainter::Antialiasing);
     qp.setRenderHint(QPainter::TextAntialiasing);

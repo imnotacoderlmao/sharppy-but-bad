@@ -277,6 +277,7 @@ void MapWidget::drawMap() {
     drawStations(qp);
 
     qp.end();
+    m_drawnTransX = m_transX; m_drawnTransY = m_transY;
 }
 
 void MapWidget::drawPolitical(QPainter& qp) {
@@ -355,7 +356,10 @@ void MapWidget::drawStations(QPainter& qp) {
 
 void MapWidget::paintEvent(QPaintEvent*) {
     QPainter qp(this);
-    qp.drawPixmap(0, 0, m_plotBitMap);
+    // While dragging the cached map is just slid along with the mouse; the full redraw happens when the drag pauses or ends.
+    const int dx = int(std::lround(m_transX - m_drawnTransX)), dy = int(std::lround(m_transY - m_drawnTransY));
+    if (dx || dy) qp.fillRect(rect(), Qt::black);
+    qp.drawPixmap(dx, dy, m_plotBitMap);
 }
 
 void MapWidget::resizeEvent(QResizeEvent* e) {
@@ -423,8 +427,15 @@ void MapWidget::mouseMoveEvent(QMouseEvent* e) {
         m_dragging = true;
         m_transX = pos.x() - m_initDragX;
         m_transY = pos.y() - m_initDragY;
-        drawMap();
-        update();
+        if (!m_dragRedraw) {
+            m_dragRedraw = new QTimer(this);
+            m_dragRedraw->setSingleShot(true);
+            m_dragRedraw->setInterval(120);
+            connect(m_dragRedraw, &QTimer::timeout, this, [this]() { if (m_hasDrag) { drawMap(); update(); } });
+        }
+        m_dragRedraw->start();
+        update();                                   // paintEvent slides the cached pixmap; no full redraw per mouse move
+        return;                                     // hover / readout resume when the drag ends
     }
     checkStations(pos);
 
@@ -445,9 +456,12 @@ void MapWidget::mouseReleaseEvent(QMouseEvent* e) {
     const QPoint pos = evPos(e);
 
     m_hasDrag = false;
+    if (m_dragRedraw) m_dragRedraw->stop();
+    const bool moved = (m_transX != 0.0 || m_transY != 0.0);
     m_mapCenterX += m_transX;
     m_mapCenterY += m_transY;
     m_transX = m_transY = 0.0;
+    if (moved) { drawMap(); update(); }            // one real redraw at the final position
 
     if (!m_dragging && !m_stnLats.empty()) {
         int idx;

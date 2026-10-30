@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QWidget>
+#include "sharppy/canvas_base.hpp"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -23,7 +24,7 @@ enum class EditMode {
 };
 
 // Port of sharppy/viz/skew.py (backgroundSkewT + plotSkewT)
-class SkewTWidget : public QWidget {
+class SkewTWidget : public CanvasBase {
     Q_OBJECT
 
 public:
@@ -68,7 +69,7 @@ signals:
     void resetRequested();
 
 protected:
-    void paintEvent(QPaintEvent* event) override;
+    SHARPPY_PAINT_HOOK(SkewTWidget)
     void resizeEvent(QResizeEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;

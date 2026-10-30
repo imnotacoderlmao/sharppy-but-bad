@@ -18,7 +18,7 @@ static QString i2s(double v) { return int2str(v); }                  // utils.IN
 static QString f2s(double v, int r) { return float2str(v, r); }      // utils.FLOAT2STR
 static inline double m2ft(double m) { return m * 3.2808399; }
 
-SkewTWidget::SkewTWidget(QWidget* parent) : QWidget(parent) {
+SkewTWidget::SkewTWidget(QWidget* parent) : CanvasBase(parent) {
     setMinimumSize(500, 500);
     setMouseTracking(true);
     initUI();
@@ -419,22 +419,50 @@ void SkewTWidget::drawTrace(QPainter& qp, const std::vector<double>& data, const
                             double width, Qt::PenStyle style, bool label) {
     qp.setClipping(true);
     qp.setPen(QPen(color, width, style)); qp.setBrush(Qt::NoBrush);
+    // Raw soundings carry >1000 levels, far more than there are pixels. Work in screen space, drop vertices that fall
+    // within half a pixel of the last kept one (invisible), and, when zoomed in, vertices that are off-screen
+    // (keeping the neighbour on each side so the line still enters/leaves the view correctly).
+    const size_t n = std::min(data.size(), pres.size());
     std::vector<double> xs, ys, ds;
-    for (size_t i = 0; i < data.size() && i < pres.size(); ++i) {
+    xs.reserve(n); ys.reserve(n); ds.reserve(n);
+    const double top = m_clip.top() - 8, bot = m_clip.bottom() + 8;
+    const double inv = 1.0 / m_scale;
+    const double ysc = (m_bry - m_tpad) / (m_logPmax - m_logPmin);
+    double lastx = 0, lasty = 0;
+    long pendingIdx = -1;                      // last vertex skipped for being off-screen (candidate "entering" neighbour)
+    double pend_x = 0, pend_y = 0, pend_d = 0;
+    bool prevOn = false;
+    bool haveFirst = false; double fx = 0, fy = 0, fd = 0;      // first valid vertex: where the surface label goes
+    for (size_t i = 0; i < n; ++i) {
         if (isn(data[i]) || isn(pres[i])) continue;
-        xs.push_back(m_originx + tmpcToPix(data[i], pres[i]) / m_scale);
-        ys.push_back(m_originy + presToPix(pres[i]) / m_scale);
-        ds.push_back(data[i]);
+        const double ypix = m_bry - ((m_logPmax - std::log(pres[i])) * ysc);          // == presToPix(p)
+        const double yrow = (m_bry - ypix) / (m_bry - m_tpad) * m_yrange;           // == tmpcToPix's inner term
+        const double xpix = m_brx - (((m_brtmpc - yrow - data[i]) / m_xrange) * (m_brx - m_lpad));
+        const double x = m_originx + xpix * inv, y = m_originy + ypix * inv;
+        if (!haveFirst) { haveFirst = true; fx = x; fy = y; fd = data[i]; }
+        const bool on = (y >= top && y <= bot);
+        if (!on) {
+            if (prevOn) { xs.push_back(x); ys.push_back(y); ds.push_back(data[i]); lastx = x; lasty = y; pendingIdx = -1; }   // leaving
+            else { pendingIdx = (long)i; pend_x = x; pend_y = y; pend_d = data[i]; }
+            prevOn = false;
+            continue;
+        }
+        if (!prevOn && pendingIdx >= 0) { xs.push_back(pend_x); ys.push_back(pend_y); ds.push_back(pend_d); lastx = pend_x; lasty = pend_y; }   // entering
+        pendingIdx = -1;
+        prevOn = true;
+        if (!xs.empty() && std::fabs(x - lastx) < 0.5 && std::fabs(y - lasty) < 0.5) continue;
+        xs.push_back(x); ys.push_back(y); ds.push_back(data[i]);
+        lastx = x; lasty = y;
     }
     if (xs.empty()) return;
-    QPainterPath path; path.moveTo(xs[0], ys[0]);
-    for (size_t i = 1; i < xs.size(); ++i) path.lineTo(xs[i], ys[i]);
-    qp.drawPath(path);
+    QVector<QPointF> pts; pts.reserve((int)xs.size());
+    for (size_t i = 0; i < xs.size(); ++i) pts.push_back(QPointF(xs[i], ys[i]));
+    qp.drawPolyline(pts.constData(), pts.size());
     if (label) {
         qp.setClipping(false);
-        double lab = (m_sfcUnits == "Celsius") ? ds[0] : (ds[0] * 1.8 + 32.0);
+        double lab = (m_sfcUnits == "Celsius") ? fd : (fd * 1.8 + 32.0);
         qp.setPen(QPen(m_bg, 0)); qp.setBrush(m_bg);
-        QRectF rect(xs[0] - 8, ys[0] + 4, 16, 12);
+        QRectF rect(fx - 8, fy + 4, 16, 12);
         qp.drawRect(rect);
         qp.setPen(QPen(color, 3)); qp.setFont(m_envTraceFont);
         qp.drawText(rect, Qt::AlignCenter | Qt::TextDontClip, i2s(lab));
@@ -558,7 +586,7 @@ void SkewTWidget::setNoCursor() {
 }
 
 // ===================================================================== paint
-void SkewTWidget::paintEvent(QPaintEvent*) {
+void SkewTWidget::paintContents(QPaintEvent*) {
     if (m_bgDirty || m_bgCache.size() != size()) {
         m_bgCache = QPixmap(size()); m_bgCache.fill(m_bg);
         QPainter bp(&m_bgCache); drawBackground(bp); bp.end();

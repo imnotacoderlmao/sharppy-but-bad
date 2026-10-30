@@ -2,6 +2,7 @@
 
 #include <QLabel>
 #include <QPixmap>
+#include <QTimer>
 #include <QTransform>
 #include <QVector>
 #include <QWidget>
@@ -79,6 +80,8 @@ private:
     Mapper m_mapper;
 
     double m_transX = 0.0, m_transY = 0.0;
+    double m_drawnTransX = 0.0, m_drawnTransY = 0.0;   // drag offset baked into m_plotBitMap; the rest is applied by shifting the pixmap
+    QTimer* m_dragRedraw = nullptr;                    // repaints the real map when the drag pauses
     double m_centerX = 0.0, m_centerY = 0.0;
     bool m_hasDrag = false;
     int m_initDragX = 0, m_initDragY = 0;

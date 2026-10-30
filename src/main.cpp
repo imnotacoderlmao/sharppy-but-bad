@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QSurfaceFormat>
 #include <QPointer>
 #include <QString>
 #include "sharppy/picker_window.hpp"
@@ -25,6 +26,20 @@ sharppy::SPCWindow* newSpcWindow(sharppy::PickerWindow* picker) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+#ifdef SHARPPY_OPENGL
+    // GPU painting for the skew-T / hodograph. 4x MSAA gives the antialiased lines the GL paint engine otherwise lacks;
+    // SHARPPY_MSAA=0 turns it off (cheaper on weak GPUs), SHARPPY_SOFTWARE_GL=1 forces Mesa's software renderer.
+    {
+        QSurfaceFormat fmt = QSurfaceFormat::defaultFormat();
+        bool ok = false;
+        const int msaa = qEnvironmentVariableIntValue("SHARPPY_MSAA", &ok);
+        fmt.setSamples(ok ? msaa : 4);
+        fmt.setSwapInterval(1);
+        QSurfaceFormat::setDefaultFormat(fmt);
+        QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+        if (qEnvironmentVariableIntValue("SHARPPY_SOFTWARE_GL")) QCoreApplication::setAttribute(Qt::AA_UseSoftwareOpenGL);
+    }
+#endif
     QApplication app(argc, argv);
     app.setOrganizationName("sharppy");
     app.setApplicationName("cppsharp");

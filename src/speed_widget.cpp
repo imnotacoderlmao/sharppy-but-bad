@@ -76,6 +76,10 @@ void SpeedWidget::paintEvent(QPaintEvent*) {
         QWidget* top = window();
         skewOffset = mapTo(top, QPoint(0, 0)).y() - m_skewt->mapTo(top, QPoint(0, 0)).y();
     }
+    // A raw sounding has far more levels than pixel rows. Bars less than a pixel apart overlap (same colour), so only the
+    // longest of each such run matters: merge them instead of drawing every one.
+    bool pend = false; double py = 0, px = 0; const QColor* pc = nullptr;
+    auto flush = [&]() { if (pend) { qp.setPen(QPen(*pc, 2)); qp.drawLine(QPointF(0, py), QPointF(px, py)); pend = false; } };
     for (size_t i = 0; i < m_prof.size(); ++i) {
         double u = m_prof.u[i], v = m_prof.v[i], p = m_prof.pres[i], h = m_prof.hght[i];
         if (u == MISSING || v == MISSING || h == MISSING || p == MISSING) continue;
@@ -85,9 +89,12 @@ void SpeedWidget::paintEvent(QPaintEvent*) {
         double x1 = speed_to_pix(spd);
         double y1 = m_skewt ? m_skewt->presToY(p) - skewOffset : pres_to_pix(p);
         const QColor& c = hg < 1000 ? m_c01 : hg < 3000 ? m_c13 : hg < 6000 ? m_c36 : hg < 9000 ? m_c69 : m_c912;
-        qp.setPen(QPen(c, 2));
-        qp.drawLine(QPointF(0, y1), QPointF(x1, y1));
+        if (pend && pc == &c && std::fabs(y1 - py) < 1.0) { if (x1 > px) px = x1; continue; }   // same row, same colour: keep the longer bar
+        flush();
+        if (y1 < -2 || y1 > by + 2) continue;                                                      // off the panel (zoomed Skew-T)
+        pend = true; py = y1; px = x1; pc = &c;
     }
+    flush();
 }
 
 } // namespace sharppy

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QWidget>
+#include "sharppy/canvas_base.hpp"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -17,7 +18,7 @@
 namespace sharppy {
 
 // Port of sharppy/viz/hodo.py (plotHodo + backgroundHodo).
-class HodoWidget : public QWidget {
+class HodoWidget : public CanvasBase {
     Q_OBJECT
 
 public:
@@ -62,7 +63,7 @@ signals:
     void windLive();                                    // dragging a hodograph point: currentProfile() is the in-progress edit
 
 protected:
-    void paintEvent(QPaintEvent* event) override;
+    SHARPPY_PAINT_HOOK(HodoWidget)
     void resizeEvent(QResizeEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;

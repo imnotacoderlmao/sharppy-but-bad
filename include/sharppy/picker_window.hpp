@@ -96,6 +96,7 @@ private:
     bool m_busy = false;
     size_t m_tries = 0;
     QString m_lastError;
+    QStringList m_attemptLog;      // one line per failed outlet, shown when every source fails
     DsPoint m_fetchStn;                // station being fetched
     std::vector<int> m_outletOrder;    // outlets that have the profile, in fetch order
     QVector<int> m_fetchIdx;           // forecast list rows requested

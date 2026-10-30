@@ -1,4 +1,5 @@
 #include "sharppy/datasource.hpp"
+#include "sharppy/sars_archive.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -93,13 +94,12 @@ QStringList splitCsvLine(const QString& line) {
     return f;
 }
 
-DsPoints loadPointsCsv(const QString& path, QString* err) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (err) *err = "cannot open " + path;
+DsPoints loadPointsCsv(const QString& label, const QByteArray& bytes, QString* err) {
+    if (bytes.isEmpty()) {
+        if (err) *err = "cannot open " + label;
         return nullptr;
     }
-    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    const QStringList lines = QString::fromUtf8(bytes).split('\n');
 
     auto pts = std::make_shared<std::vector<DsPoint>>();
     QStringList header;
@@ -138,7 +138,7 @@ DsPoints loadPointsCsv(const QString& path, QString* err) {
 
 bool formatSupported(const QString& f) {
     const QString l = f.toLower();
-    return l == "spc" || l == "bufkit";
+    return l == "spc" || l == "bufkit" || l == "uwyo";
 }
 
 } // namespace
@@ -180,6 +180,7 @@ bool DsOutlet::customAvail() const {
     if (o == "psu") return psu.contains(d);
     if (o == "iem") return iem.contains(d);
     if (o == "sharp") return d == "observed" || d == "ncar ensemble" || d == "goes";
+    if (o.startsWith("uwyo")) return d == "observed";
     return false;
 }
 
@@ -231,7 +232,7 @@ QVector<QDateTime> DsOutlet::availableTimes(const QDate& dt, const QDateTime& no
     if (!useFallback) {
         if (o == "iem") {
             times = iemTimes(d, dt, nowUtc);
-        } else if (o == "sharp" && d == "observed") {
+        } else if ((o == "sharp" || o.startsWith("uwyo")) && d == "observed") {
             // The Python scrapes the OU archive index. Offline we assume the standard
             // synoptic launches exist for every archived day (03/15Z before May 1957).
             if (!dt.isValid()) {
@@ -241,7 +242,7 @@ QVector<QDateTime> DsOutlet::availableTimes(const QDate& dt, const QDateTime& no
                 if (!parseSpanDate(startAttr, nowUtc, s)) s = QDate(1946, 1, 1);
                 if (dt >= s && dt <= nowUtc.date()) {
                     std::vector<int> hrs = cycles();
-                    if (dt < QDate(1957, 5, 1)) hrs = {3, 15};
+                    if (o == "sharp" && dt < QDate(1957, 5, 1)) hrs = {3, 15};
                     const QDateTime limit = nowUtc.addSecs(-static_cast<qint64>(delay) * 3600);
                     for (int h : hrs) {
                         const QDateTime t = at(dt, h);
@@ -274,6 +275,16 @@ bool DsOutlet::sameStation(const DsPoint& wanted, const std::vector<DsPoint>& ca
         }
     }
     return false;
+}
+
+const DsPoint* DsOutlet::matchStation(const DsPoint& wanted) const {
+    if (!points) return nullptr;
+    for (const DsPoint& s : *points) {
+        if (!wanted.icao.empty()) { if (s.icao == wanted.icao) return &s; }
+        else if (!wanted.iata.empty()) { if (s.iata == wanted.iata) return &s; }
+        else if (s.synop == wanted.synop) return &s;
+    }
+    return nullptr;
 }
 
 QString DsOutlet::url(const DsPoint& stn, const QDateTime& c) const {
@@ -466,6 +477,15 @@ QString findDataSourceDir() {
 DataSourceSet loadDataSources(const QString& dirIn) {
     DataSourceSet set;
     set.dir = dirIn.isEmpty() ? findDataSourceDir() : dirIn;
+    // Datasource files may also live inside sars.sarspack (entry type 2); loose files win so they can be edited.
+    const QString pack = sarspack_find(2);
+    const QStringList packed = pack.isEmpty() ? QStringList() : sarspack_list(pack, 2);
+    if (set.dir.isEmpty() && !packed.isEmpty()) set.dir = pack;
+    auto readAsset = [&](const QString& name) -> QByteArray {
+        QFile lf(QDir(set.dir).absoluteFilePath(name));
+        if (set.dir != pack && lf.open(QIODevice::ReadOnly)) return lf.readAll();
+        return packed.contains(name) ? sarspack_read(pack, 2, name) : QByteArray();
+    };
     if (set.dir.isEmpty()) {
         set.warnings << "No datasource folder found (looked for data/datasources next to the program, "
                         "SHARPPY_DATASOURCES and ~/.sharppy/datasources).";
@@ -473,18 +493,20 @@ DataSourceSet loadDataSources(const QString& dirIn) {
     }
 
     const QDir dir(set.dir);
-    const QStringList files = dir.entryList(QStringList() << "*.xml", QDir::Files, QDir::Name);
+    QStringList files = set.dir == pack ? QStringList() : dir.entryList(QStringList() << "*.xml", QDir::Files, QDir::Name);
+    for (const QString& n : packed) if (n.endsWith(".xml", Qt::CaseInsensitive) && !files.contains(n)) files << n;
+    files.sort();
 
     std::map<QString, DsPoints> csvCache;
     std::map<QString, DataSource> byName;
 
     for (const QString& fn : files) {
-        QFile f(dir.absoluteFilePath(fn));
-        if (!f.open(QIODevice::ReadOnly)) {
+        const QByteArray xmlBytes = readAsset(fn);
+        if (xmlBytes.isEmpty()) {
             set.warnings << "Unable to open " + fn;
             continue;
         }
-        QXmlStreamReader xml(&f);
+        QXmlStreamReader xml(xmlBytes);
 
         DataSource cur;
         DsOutlet* curOutlet = nullptr;
@@ -542,7 +564,7 @@ DataSourceSet loadDataSources(const QString& dirIn) {
                     auto it = csvCache.find(curOutlet->csvName);
                     if (it == csvCache.end()) {
                         QString err;
-                        DsPoints pts = loadPointsCsv(dir.absoluteFilePath(curOutlet->csvName), &err);
+                        DsPoints pts = loadPointsCsv(curOutlet->csvName, readAsset(curOutlet->csvName), &err);
                         if (!pts) {
                             set.warnings << QString("Data source '%1': %2").arg(cur.name, err);
                             broken = true;

@@ -176,15 +176,18 @@ void SPCWindow::setupUI() {
     });
 
     connect(m_skewt, &SkewTWidget::profileModified, this, [this]() {
+        markModified();
         m_prof = m_skewt->currentProfile();
         recomputeAll();
     });
 
     connect(m_skewt, &SkewTWidget::profileLive, this, [this]() {
+        markModified();
         m_prof = m_skewt->currentProfile();
         recomputeAll();
     });
     connect(m_hodo, &HodoWidget::windLive, this, [this]() {
+        markModified();
         m_prof = m_hodo->currentProfile();
         recomputeAll();
     });
@@ -202,6 +205,7 @@ void SPCWindow::setupUI() {
     });
 
     connect(m_hodo, &HodoWidget::windModified, this, [this]() {
+        markModified();
         m_prof = m_hodo->currentProfile();
         recomputeAll();
     });
@@ -419,13 +423,34 @@ void SPCWindow::showFetchSoundingDialog() {
     }
 }
 
+QString SPCWindow::displayTitle() const {
+    QString t = QString::fromStdString(m_currentTitle);
+    if (!m_modified) return t;
+    // "(Observed: SPC)" -> "(Observed: SPC, Modified)"; titles with no source group get " (Modified)"
+    static const QRegularExpression src(R"(\(([^()]*: [^()]*)\))");
+    const QRegularExpressionMatch m = src.match(t);
+    if (m.hasMatch()) { t.insert(m.capturedEnd(0) - 1, ", Modified"); return t; }
+    return t + " (Modified)";
+}
+
+void SPCWindow::refreshTitle() {
+    m_skewt->setTitle(m_currentTitle.empty() ? QString() : displayTitle());
+}
+
+void SPCWindow::markModified() {
+    if (m_modified) return;
+    m_modified = true;
+    refreshTitle();
+}
+
 void SPCWindow::loadSoundingFromData(const Profile& prof, const QString& title) {
     if (m_collection.isEmpty()) m_preInterp.clear();
     m_prof = prof;
     sanitize_profile(m_prof); // idempotent; leaves the profile alone if it can't be cleaned
     m_origProfile = prof;
     m_currentTitle = title.toStdString();
-    m_skewt->setTitle(QString::fromStdString(m_currentTitle));
+    m_modified = false;
+    refreshTitle();
     m_hasCustomStorm = false;
     applyHemisphere();
     if (m_collection.isEmpty() && m_profileMenu) rebuildProfileMenu();
@@ -486,6 +511,7 @@ void SPCWindow::showSurfaceModifyDialog() {
     SurfaceModifyDialog dlg(cur_t, cur_td, this);
     if (dlg.exec() == QDialog::Accepted) {
         ProfileModifier::modify_surface(m_prof, dlg.getTemp(), dlg.getDewpoint(), dlg.isDryMix());
+        markModified();
         recomputeAll();
     }
 }
@@ -494,6 +520,8 @@ void SPCWindow::resetModifications() {
     if (m_origProfile.empty()) return;
     m_prof = m_origProfile;
     m_hasCustomStorm = false;
+    m_modified = false;
+    refreshTitle();
     recomputeAll();
 }
 
@@ -630,7 +658,8 @@ bool SPCWindow::loadSoundingFile(const std::string& path) {
     if (SpcParser::parse_file(path, m_prof, meta)) {
         m_origProfile = m_prof;
         m_currentTitle = meta.title.empty() ? path : meta.title;
-        m_skewt->setTitle(QString::fromStdString(m_currentTitle));
+        m_modified = false;
+        refreshTitle();
         m_hasCustomStorm = false;
         applyHemisphere();
         recomputeAll();
@@ -642,7 +671,8 @@ bool SPCWindow::loadSoundingFile(const std::string& path) {
         m_prof = buf_recs.front().profile;
         m_origProfile = m_prof;
         m_currentTitle = buf_recs.front().station_id + " " + buf_recs.front().valid_time;
-        m_skewt->setTitle(QString::fromStdString(m_currentTitle));
+        m_modified = false;
+        refreshTitle();
         m_hasCustomStorm = false;
         applyHemisphere();
         recomputeAll();
@@ -652,7 +682,8 @@ bool SPCWindow::loadSoundingFile(const std::string& path) {
     if (UwyoParser::parse_file(path, m_prof, meta)) {
         m_origProfile = m_prof;
         m_currentTitle = path;
-        m_skewt->setTitle(path.empty() ? QString() : QString::fromStdString(path));
+        m_modified = false;
+        refreshTitle();
         m_hasCustomStorm = false;
         applyHemisphere();
         recomputeAll();
@@ -665,7 +696,8 @@ bool SPCWindow::loadSoundingFile(const std::string& path) {
             m_origProfile = m_prof = cm1;
             const QString base = QFileInfo(QString::fromStdString(path)).fileName();
             m_currentTitle = "CM1 " + base.toStdString();
-            m_skewt->setTitle(QString::fromStdString(m_currentTitle));
+            m_modified = false;
+        refreshTitle();
             m_hasCustomStorm = false;
             applyHemisphere();
             recomputeAll();

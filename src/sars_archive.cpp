@@ -1,5 +1,7 @@
 #include "sharppy/sars_archive.hpp"
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QFile>
 #include <QHash>
 #include <QtEndian>
@@ -48,6 +50,42 @@ bool nameMatches(const QString& file, const QString& date, const QString& loc) {
 }
 }
 
+namespace {
+Archive& sharedArchive() { static Archive a; return a; }
+}
+
+QStringList sarspack_list(const QString& archivePath, int type) {
+    QStringList out;
+    Archive& a = sharedArchive();
+    if (!QFile::exists(archivePath) || !a.open(QDir::cleanPath(archivePath))) return out;
+    for (const Entry& e : a.entries) if (e.type == type) out << e.name;
+    return out;
+}
+
+QByteArray sarspack_read(const QString& archivePath, int type, const QString& name) {
+    Archive& a = sharedArchive();
+    if (!QFile::exists(archivePath) || !a.open(QDir::cleanPath(archivePath))) return {};
+    for (const Entry& e : a.entries)
+        if (e.type == type && e.name == name) return qUncompress(a.data.mid(int(e.off), int(e.csize)));
+    return {};
+}
+
+QString sarspack_find(int requireType) {
+    QStringList c;
+    const QString env = qEnvironmentVariable("SHARPPY_SARSPACK");
+    if (!env.isEmpty()) c << env;
+    for (QDir d(QCoreApplication::applicationDirPath()); ; ) {
+        c << d.absoluteFilePath("data/sars/sars.sarspack") << d.absoluteFilePath("sars/sars.sarspack");
+        if (!d.cdUp()) break;
+    }
+    c << QDir::current().absoluteFilePath("data/sars/sars.sarspack") << QDir::homePath() + "/.sharppy/sars.sarspack";
+    for (const QString& f : c) {
+        if (!QFileInfo::exists(f)) continue;
+        if (requireType < 0 || !sarspack_list(QDir::cleanPath(f), requireType).isEmpty()) return QDir::cleanPath(f);
+    }
+    return {};
+}
+
 QByteArray sars_read_sounding(const std::string& sars_dir, const QString& type, const QString& match, QString* fileName) {
     const QStringList parts = match.split('.');
     if (parts.size() != 2) return {};
@@ -55,7 +93,7 @@ QByteArray sars_read_sounding(const std::string& sars_dir, const QString& type, 
     const quint8 tid = type.toLower() == "hail" ? 0 : 1;
     const QString base = QString::fromStdString(sars_dir);
 
-    static Archive arc;
+    Archive& arc = sharedArchive();
     for (const QString& cand : {base + "/sars.sarspack", base + "/../sars.sarspack"}) {
         if (!QFile::exists(cand) || !arc.open(QDir::cleanPath(cand))) continue;
         for (const Entry& e : arc.entries) {

@@ -77,6 +77,10 @@ private:
     Profile m_prof;
     Profile m_origProfile;
     std::string m_currentTitle = "Sample Sounding";
+    bool m_modified = false;                 // profile edited since it was loaded -> title gets ", Modified"
+    QString displayTitle() const;
+    void refreshTitle();
+    void markModified();
 
     QVector<Profile> m_collection;
     QStringList m_collectionTitles;

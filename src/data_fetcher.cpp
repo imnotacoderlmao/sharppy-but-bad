@@ -117,6 +117,7 @@ void DataFetcher::cancel() {
 
 void DataFetcher::fetchSounding(SoundingSource source, const std::string& stationId, const QDate& date, int cycleHour) {
     cancel();
+    m_fallbackUrls.clear();
     m_currentSource = source;
 
     std::string cleanId = stationId;
@@ -150,11 +151,20 @@ void DataFetcher::fetchSounding(SoundingSource source, const std::string& statio
             m_expectedTitle = QString("%1 %2%3%4/%5Z IEM RAOB").arg(QString::fromStdString(cleanId), yyyy, mm, dd, hh);
             break;
 
-        case SoundingSource::UWYO_OBSERVED:
-            urlStr = QString("https://weather.uwyo.edu/cgi-bin/sounding?region=nnam&TYPE=TEXT%3ALIST&YEAR=%1&MONTH=%2&FROM=%3%4&TO=%3%4&STNM=%5")
-                         .arg(yyyy, mm, dd, hh, QString::fromStdString(synop));
+        case SoundingSource::UWYO_OBSERVED: {
+            // weather.uwyo.edu/cgi-bin/sounding is retired; the page now uses wsgi/sounding. Soundings that the site lists
+            // are stored as either TEMP (FM35) or BUFR reports, and autodetect does not always find them, so each
+            // format is tried in turn, with the old CGI as a last resort.
+            const QString dt = QString("%1-%2-%3%%20%4:00:00").arg(yyyy, mm, dd, hh);
+            const QString id = QString::fromStdString(synop);
+            for (const char* src : {"UNKNOWN", "BUFR", "FM35"})
+                m_fallbackUrls << QString("https://weather.uwyo.edu/wsgi/sounding?datetime=%1&id=%2&src=%3&type=TEXT:LIST").arg(dt, id, src);
+            m_fallbackUrls << QString("https://weather.uwyo.edu/cgi-bin/sounding?region=nnam&TYPE=TEXT%3ALIST&YEAR=%1&MONTH=%2&FROM=%3%4&TO=%3%4&STNM=%5")
+                                  .arg(yyyy, mm, dd, hh, id);
+            urlStr = m_fallbackUrls.takeFirst();
             m_expectedTitle = QString("%1 %2%3%4/%5Z UWYO").arg(QString::fromStdString(cleanId), yyyy, mm, dd, hh);
             break;
+        }
 
         case SoundingSource::BUFKIT_RAP:
             urlStr = QString("https://mtarchive.geol.iastate.edu/%1/%2/%3/bufkit/%4/rap/rap_%5.buf")
@@ -174,6 +184,8 @@ void DataFetcher::fetchSounding(SoundingSource source, const std::string& statio
 
 void DataFetcher::fetchUrl(const QString& urlStr, const QString& title) {
     cancel();
+    m_fallbackUrls.clear();
+    m_currentSource = SoundingSource::SPC_OBSERVED;     // generic URL: no UWyo-specific checks
     m_expectedTitle = title;
     startRequest(QUrl(urlStr));
 }
@@ -200,6 +212,7 @@ void DataFetcher::onReplyFinished() {
         QString err = m_currentReply->errorString();
         m_currentReply->deleteLater();
         m_currentReply = nullptr;
+        if (!m_fallbackUrls.isEmpty()) { startRequest(QUrl(m_fallbackUrls.takeFirst())); return; }
         emit fetchFinished(false, "", err, m_expectedTitle);
         return;
     }
@@ -209,6 +222,17 @@ void DataFetcher::onReplyFinished() {
 
     m_currentReply->deleteLater();
     m_currentReply = nullptr;
+
+    // UWyo answers 200 with a short message (or an HTML page) when it has no report in that format: try the next one.
+    if (!m_fallbackUrls.isEmpty() && !(content.contains("PRES") && content.contains("HGHT"))) {
+        startRequest(QUrl(m_fallbackUrls.takeFirst()));
+        return;
+    }
+
+    if (m_currentSource == SoundingSource::UWYO_OBSERVED && !(content.contains("PRES") && content.contains("HGHT"))) {
+        emit fetchFinished(false, "", "University of Wyoming has no sounding for this station/date/cycle (tried autodetect, BUFR and TEMP).", m_expectedTitle);
+        return;
+    }
 
     if (content.trimmed().isEmpty()) {
         emit fetchFinished(false, "", "Server returned an empty sounding response.", m_expectedTitle);

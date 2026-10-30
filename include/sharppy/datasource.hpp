@@ -56,6 +56,8 @@ public:
 
     // True when available.py has a custom time lookup for this outlet/datasource pair.
     bool customAvail() const;
+    // This outlet's own entry for a station picked on the map (its srcid can differ between outlets, e.g. UWyo uses WMO numbers).
+    const DsPoint* matchStation(const DsPoint& wanted) const;
 
     QDateTime mostRecentCycle(const QDateTime& nowUtc) const;
     QVector<QDateTime> archivedCycles(const QDateTime& start, int maxCycles = 100) const;

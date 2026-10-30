@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QDate>
 #include <QTime>
 #include <QNetworkAccessManager>
@@ -57,6 +58,7 @@ private:
     QNetworkAccessManager* m_manager;
     QNetworkReply* m_currentReply = nullptr;
     QString m_expectedTitle;
+    QStringList m_fallbackUrls;      // alternative URLs tried in order when the current one fails or has no data
     SoundingSource m_currentSource = SoundingSource::SPC_OBSERVED;
 };
 

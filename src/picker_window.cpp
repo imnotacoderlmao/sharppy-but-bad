@@ -641,6 +641,7 @@ void Picker::onGenerate() {
 
     m_tries = 0;
     m_lastError.clear();
+    m_attemptLog.clear();
     m_busy = true;
     startFetchAttempt();
 }
@@ -665,23 +666,30 @@ void Picker::startFetchAttempt() {
             m_button->setEnabled(m_hasLoc && m_hasConnection);
         });
     }
-    m_progress->setLabelText("Downloading Profile");
+    m_progress->setLabelText(QString("Downloading Profile\n%1 %2/%3Z from %4 (source %5 of %6)")
+                                 .arg(m_dispName, m_run.toString("yyyy-MM-dd"), m_run.toString("HH"),
+                                      source().outlets[static_cast<size_t>(m_outletOrder[m_tries])].name)
+                                 .arg(m_tries + 1).arg(m_outletOrder.size()));
     m_progress->setRange(0, 0);
     m_progress->show();
     m_button->setDisabled(true);
 
     const DsOutlet& o = source().outlets[static_cast<size_t>(m_outletOrder[m_tries])];
-    const QString title = QString("%1 %2/%3Z %4")
-                              .arg(m_dispName, m_run.toString("yyyyMMdd"), m_run.toString("HH"), o.name);
-    m_fetcher->fetchUrl(o.url(m_fetchStn, m_run), title);
+    const QString title = QString("%1 %2/%3Z (%4: %5)")
+                              .arg(m_dispName, m_run.toString("yyyyMMdd"), m_run.toString("HH"), source().name, o.name);
+    DsPoint stn = m_fetchStn;
+    if (const DsPoint* own = o.matchStation(m_fetchStn)) stn.srcid = own->srcid;   // per-outlet station id
+    m_fetcher->fetchUrl(o.url(stn, m_run), title);
 }
 
 void Picker::onFetchFinished(bool success, const QString& content, const QString& errorMsg,
                              const QString& title) {
     if (!m_busy) return; // cancelled or stale
 
+    const QString outletName = source().outlets[static_cast<size_t>(m_outletOrder[m_tries])].name;
     if (!success) {
         m_lastError = errorMsg;
+        m_attemptLog << outletName + ": " + errorMsg;
         ++m_tries;
         startFetchAttempt();
         return;
@@ -692,6 +700,7 @@ void Picker::onFetchFinished(bool success, const QString& content, const QString
     ParsedSounding ps;
     if (!parseAll(content.toStdString(), title, ps) || ps.profiles.isEmpty()) {
         m_lastError = "The downloaded data could not be parsed as an SPC, BUFKIT or UWyo sounding.";
+        m_attemptLog << outletName + ": no usable sounding in the reply";
         ++m_tries;
         startFetchAttempt();
         return;
@@ -724,7 +733,7 @@ void Picker::onFetchFinished(bool success, const QString& content, const QString
         }
     } else {
         outProfs << ps.profiles.first();
-        outTitles << ps.titles.first();
+        outTitles << title;                    // "STN yyyymmdd/hhZ (Observed: SPC)"
     }
 
     for (Profile& pr : outProfs) {
@@ -743,9 +752,19 @@ void Picker::finishFetch() {
 
 void Picker::fail(const QString& message) {
     finishFetch();
-    QMessageBox::critical(this, "SHARPpy",
-                          "No outlet found with the requested profile!" +
-                              (message.isEmpty() ? QString() : "\n\n" + message));
+    QString text;
+    if (m_outletOrder.empty()) {
+        text = "No outlet found with the requested profile!\n\nNone of this source's outlets lists this station at this time.";
+    } else {
+        QStringList names;
+        for (int i : m_outletOrder) names << source().outlets[static_cast<size_t>(i)].name;
+        text = QString("Could not find a sounding for %1 at %2 %3Z.\n\nTried %4 source%5: %6.")
+                   .arg(m_dispName, m_run.toString("yyyy-MM-dd"), m_run.toString("HH"))
+                   .arg(names.size()).arg(names.size() == 1 ? "" : "s").arg(names.join(", "));
+        if (!m_attemptLog.isEmpty()) text += "\n\n" + m_attemptLog.join("\n");
+    }
+    (void)message;
+    QMessageBox::critical(this, "SHARPpy", text);
 }
 
 // ---------------------------------------------------------------------------

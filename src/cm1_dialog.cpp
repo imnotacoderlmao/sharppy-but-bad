@@ -3,6 +3,9 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QLabel>
+#include <QPlainTextEdit>
+#include <QFontDatabase>
 #include <QSettings>
 #include <QVBoxLayout>
 
@@ -13,7 +16,7 @@ static QDoubleSpinBox* spin(double v, double lo, double hi, int dec, const QStri
     return s;
 }
 
-Cm1ExportDialog::Cm1ExportDialog(QWidget* parent) : QDialog(parent) {
+Cm1ExportDialog::Cm1ExportDialog(const Profile& prof, QWidget* parent) : QDialog(parent), m_prof(prof) {
     setWindowTitle("Export CM1 Sounding");
     QSettings st("sharppy_cpp", "sharppy");
     auto* form = new QFormLayout;
@@ -50,9 +53,53 @@ Cm1ExportDialog::Cm1ExportDialog(QWidget* parent) : QDialog(parent) {
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    m_stabSummary = new QLabel;
+    m_stabSummary->setWordWrap(true);
+    m_stabList = new QPlainTextEdit; m_stabList->setReadOnly(true); m_stabList->setMinimumHeight(140);
+    m_stabList->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_stabList->setLineWrapMode(QPlainTextEdit::NoWrap);
     auto* lay = new QVBoxLayout(this);
+    setMinimumWidth(640);
     lay->addLayout(form);
+    lay->addWidget(new QLabel("<b>CM1 stability check</b> (base.F: needs N² &gt; 0 and Ri &gt; 0.25)"));
+    lay->addWidget(m_stabSummary);
+    lay->addWidget(m_stabList);
     lay->addWidget(bb);
+    for (QDoubleSpinBox* b : {m_dz, m_desat, m_dlBot, m_dlTop, m_dlPct, m_fill, m_adiaH, m_adiaS})
+        connect(b, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this]() { updateStability(); });
+    connect(m_layer, &QCheckBox::toggled, this, [this]() { updateStability(); });
+    updateStability();
+}
+
+void Cm1ExportDialog::updateStability() {
+    Cm1Sounding snd; std::string err;
+    if (!build_cm1(m_prof, options(), snd, &err)) {
+        m_stabSummary->setText("Cannot check: " + QString::fromStdString(err));
+        m_stabList->clear();
+        return;
+    }
+    const Cm1Stability st = cm1_stability(snd);
+    const int total = (int)st.rows.size();
+    if (st.nN2bad == 0 && st.nRibad == 0) {
+        m_stabSummary->setText(QString("All %1 level pairs pass (N² > 0 and Ri > 0.25).").arg(total));
+        m_stabList->setPlainText("No problem levels.");
+        return;
+    }
+    m_stabSummary->setText(QString("N² ≤ 0 at %1 of %2 level pairs; Ri ≤ 0.25 at %3. Line numbers are lines of the exported file "
+                                   "(line 1 is the surface line); each row is the layer between that line and the one above it. "
+                                   "N² uses virtual potential temperature (moisture included), so the superadiabatic limit, which acts on θ only, may not clear it; edit the sounding near those heights.")
+                           .arg(st.nN2bad).arg(total).arg(st.nRibad));
+    QString t = "  line   z (m)       N² (1/s²)      Ri        issue\n";
+    int shown = 0;
+    for (const Cm1StabRow& r : st.rows) {
+        if (!r.n2bad && !r.ribad) continue;
+        if (++shown > 400) { t += "  ... (more levels not shown)\n"; break; }
+        QString issue;
+        if (r.n2bad) issue += (r.n2 < -1e-12 ? "N² < 0 (CM1 warns) " : "N² = 0 ");
+        if (r.ribad) issue += "Ri < 0.25";
+        t += QString("%1 %2 %3 %4  %5\n").arg(r.line, 6).arg(r.z, 9, 'f', 1).arg(r.n2, 14, 'e', 3).arg(r.ri, 11, 'g', 4).arg(issue.trimmed());
+    }
+    m_stabList->setPlainText(t);
 }
 
 Cm1ExportOptions Cm1ExportDialog::options() const {

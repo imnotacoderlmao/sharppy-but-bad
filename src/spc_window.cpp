@@ -595,7 +595,7 @@ void SPCWindow::importCm1() {
 
 void SPCWindow::exportCm1() {
     if (m_prof.empty()) return;
-    Cm1ExportDialog dlg(this);
+    Cm1ExportDialog dlg(m_prof, this);
     if (dlg.exec() != QDialog::Accepted) return;
     QSettings st("sharppy_cpp", "sharppy");
     QString path = QFileDialog::getSaveFileName(this, "Export CM1 Sounding", st.value("paths/cm1", QDir::homePath()).toString() + "/input_sounding.cm1", "CM1 input sounding (*.cm1)");

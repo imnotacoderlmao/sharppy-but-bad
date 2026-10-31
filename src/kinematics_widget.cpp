@@ -242,14 +242,30 @@ void KinematicsWidget::drawBarbs(QPainter& qp) {
 }
 
 void KinematicsWidget::paintEvent(QPaintEvent*) {
+    // The background, border and static labels only change with size/colours/font/units, so they are drawn once
+    // into a pixmap (m_barby is a by-product of drawFrame and stays valid while the key is unchanged).
+    const qreal dpr = devicePixelRatioF();
+    const QString key = QString("%1x%2@%3|%4,%5|%6|%7|%8,%9,%10,%11").arg(width()).arg(height()).arg(dpr)
+        .arg(m_bg.rgba()).arg(m_fg.rgba()).arg(m_labelFont.toString()).arg(m_windUnits)
+        .arg(m_lpad).arg(m_rpad).arg(m_tpad, 0, 'g', 17).arg(m_labelHeight, 0, 'g', 17);
+    if (m_framePix.isNull() || key != m_frameKey) {
+        m_framePix = QPixmap(size() * dpr); m_framePix.setDevicePixelRatio(dpr);
+        QPainter fp(&m_framePix);
+        fp.fillRect(rect(), m_bg);
+        fp.setPen(QPen(QColor("#3399CC"), 1));
+        fp.drawRect(0, 0, width() - 1, height() - 1);
+        fp.translate(1, 1);
+        fp.setRenderHint(QPainter::Antialiasing);
+        fp.setRenderHint(QPainter::TextAntialiasing);
+        drawFrame(fp);
+        fp.end();
+        m_frameKey = key;
+    }
     QPainter qp(this);
-    qp.fillRect(rect(), m_bg);
-    qp.setPen(QPen(QColor("#3399CC"), 1));
-    qp.drawRect(0, 0, width() - 1, height() - 1);
+    qp.drawPixmap(0, 0, m_framePix);
     qp.translate(1, 1);
     qp.setRenderHint(QPainter::Antialiasing);
     qp.setRenderHint(QPainter::TextAntialiasing);
-    drawFrame(qp);
     if (!m_hasData) return;
     drawKinematics(qp);
     drawBarbs(qp);

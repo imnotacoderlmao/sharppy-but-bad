@@ -86,10 +86,20 @@ bool read_cm1(const std::string& path, Profile& out, std::string* err) {
         if (d < 0) d += 360;
         wdir[k] = d;
     }
+    // The input_sounding has no surface wind (cm12snd inserts a calm 0,0 there). CM1 itself extrapolates it linearly from
+    // the first two wind rows (base.F, isnd = 7); do the same here. With fewer than two wind rows the level is marked
+    // missing and sanitize_profile fills it from the lowest real level.
+    if (N >= 3) {
+        u[0] = u[1] - (hght[1] - hght[0]) * (u[2] - u[1]) / (hght[2] - hght[1]);
+        v[0] = v[1] - (hght[1] - hght[0]) * (v[2] - v[1]) / (hght[2] - hght[1]);
+        wspd[0] = std::sqrt(u[0] * u[0] + v[0] * v[0]);
+        double d0 = std::atan2(-u[0], -v[0]) * 180.0 / kPi; if (d0 < 0) d0 += 360;
+        wdir[0] = d0;
+    } else { wdir[0] = MISSING; wspd[0] = MISSING; }
     Profile p;
     p.pres = pres; p.hght = hght; p.temp = tmpc; p.dwpt = dwpc; p.wdir = wdir; p.wspd = wspd;
     p.u.resize(N); p.v.resize(N);
-    for (size_t k = 0; k < N; ++k) vec2comp(wdir[k], wspd[k], p.u[k], p.v[k]);
+    for (size_t k = 0; k < N; ++k) { if (wspd[k] == MISSING) p.u[k] = p.v[k] = MISSING; else vec2comp(wdir[k], wspd[k], p.u[k], p.v[k]); }
     p.sfc_pres = pres[0]; p.sfc_hght = hght[0];
     if (!sanitize_profile(p)) { if (err) *err = "fewer than two usable levels"; return false; }
     out = p;
@@ -97,10 +107,8 @@ bool read_cm1(const std::string& path, Profile& out, std::string* err) {
 }
 
 // ===================== sndmod =====================
-bool write_cm1(const Profile& prof, const std::string& pathIn, const Cm1ExportOptions& o, std::string* err) {
+bool build_cm1(const Profile& prof, const Cm1ExportOptions& o, Cm1Sounding& snd, std::string* err) {
     using tab::mixratio; using tab::temp_at_mixrat;
-    std::string path = pathIn;
-    if (path.size() < 4 || path.compare(path.size() - 4, 4, ".cm1") != 0) path += ".cm1";
 
     // only levels where everything that matters is valid
     std::vector<double> P, H, T, Td, U, V, RH;
@@ -187,6 +195,18 @@ bool write_cm1(const Profile& prof, const std::string& pathIn, const Cm1ExportOp
         nu[i] *= 0.514444; nv[i] *= 0.514444;                                // KTS2MS
     }
 
+    snd.nh = nh; snd.np = np; snd.nt = nt; snd.th = th; snd.mixr = mixr; snd.nu = nu; snd.nv = nv; snd.nuk = nuk; snd.nvk = nvk;
+    return true;
+}
+
+bool write_cm1(const Profile& prof, const std::string& pathIn, const Cm1ExportOptions& o, std::string* err) {
+    std::string path = pathIn;
+    if (path.size() < 4 || path.compare(path.size() - 4, 4, ".cm1") != 0) path += ".cm1";
+    Cm1Sounding snd;
+    if (!build_cm1(prof, o, snd, err)) return false;
+    const auto& nh = snd.nh; const auto& np = snd.np; const auto& nt = snd.nt; const auto& th = snd.th; const auto& mixr = snd.mixr;
+    const auto& nu = snd.nu; const auto& nv = snd.nv; const auto& nuk = snd.nuk; const auto& nvk = snd.nvk;
+    const long n = (long)nh.size();
     std::ofstream out(path);
     if (!out) { if (err) *err = "cannot write " + path; return false; }
     const std::string D = "\t\t";                                           // delimiter "\t" + "\t"
@@ -215,6 +235,44 @@ bool write_cm1(const Profile& prof, const std::string& pathIn, const Cm1ExportOp
         s << "%END%\n";
     }
     return true;
+}
+
+// ===================== CM1 stability check (base.F "Ri check" / "N^2 check") =====================
+// CM1 evaluates, per model level k >= 2:  N^2 = g*ln(thv_k/thv_{k-1})/dz ;  Ri = N^2/(1e-12 + dudz^2 + dvdz^2)
+// and warns when N^2 < 0 or Ri < 0.25. Here it is evaluated on the exported levels (CM1 does it on its own grid, so
+// the numbers match when the model dz equals the export dz). The surface wind is extrapolated from the first two wind
+// rows exactly as base.F does for isnd = 7.
+Cm1Stability cm1_stability(const Cm1Sounding& s) {
+    Cm1Stability r;
+    const size_t n = s.nh.size();
+    if (n < 2) return r;
+    const double g = 9.81, reps = 1. / 0.62197;
+    std::vector<double> z(n), thv(n), u(n), v(n);
+    for (size_t i = 0; i < n; ++i) {
+        z[i] = s.nh[i] - s.nh[0];
+        const double q = s.mixr[i] / 1000.;
+        thv[i] = s.th[i] * (1.0 + q * reps) / (1.0 + q);
+        u[i] = s.nu[i]; v[i] = s.nv[i];
+    }
+    if (n >= 3) {   // usnd(1) = usnd(2) - (zsnd(2)-zsnd(1))*(usnd(3)-usnd(2))/(zsnd(3)-zsnd(2))
+        u[0] = u[1] - (z[1] - z[0]) * (u[2] - u[1]) / (z[2] - z[1]);
+        v[0] = v[1] - (z[1] - z[0]) * (v[2] - v[1]) / (z[2] - z[1]);
+    } else { u[0] = u[1]; v[0] = v[1]; }
+    for (size_t i = 1; i < n; ++i) {
+        const double rdz = 1.0 / (z[i] - z[i - 1]);
+        Cm1StabRow w;
+        w.line = (int)i + 1;                       // file line of the upper level (line 1 is the surface line)
+        w.z = z[i];
+        w.n2 = g * std::log(thv[i] / thv[i - 1]) * rdz;
+        const double dudz = (u[i] - u[i - 1]) * rdz, dvdz = (v[i] - v[i - 1]) * rdz;
+        w.ri = w.n2 / (1.0e-12 + dudz * dudz + dvdz * dvdz);
+        w.n2bad = !(w.n2 > 0.0);
+        w.ribad = !(w.ri > 0.25);
+        if (w.n2bad) ++r.nN2bad;
+        if (w.ribad) ++r.nRibad;
+        r.rows.push_back(w);
+    }
+    return r;
 }
 
 } // namespace sharppy

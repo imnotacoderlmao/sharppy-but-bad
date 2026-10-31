@@ -1,3 +1,4 @@
+#include <cstring>
 #include "sharppy/winds.hpp"
 #include "sharppy/tab.hpp"
 #include "sharppy/thermo.hpp"
@@ -17,7 +18,28 @@ static WindVector mk(double u, double v) {
 }
 
 // ---- exact sharptab/winds.py (pressure coordinates) ----
+static WindVector mean_wind_pres_impl(const Profile& prof, double pbot, double ptop, bool weighted);
+
+// Memoized: the same layers are asked for by several panels in one recompute. The cache is dropped whenever
+// pres/u/v differ (bit-for-bit) from the profile it was filled for, so results are identical to recomputing.
 WindVector mean_wind_pres(const Profile& prof, double pbot, double ptop, bool weighted) {
+    struct Ent { double pb, pt; bool w; WindVector r; };
+    struct Memo { std::vector<double> pres, u, v; std::vector<Ent> ents; };
+    thread_local Memo m;
+    auto same = [](const std::vector<double>& a, const std::vector<double>& b) {
+        return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
+    };
+    if (!(same(m.pres, prof.pres) && same(m.u, prof.u) && same(m.v, prof.v))) {
+        m.pres = prof.pres; m.u = prof.u; m.v = prof.v; m.ents.clear();
+    }
+    for (const Ent& e : m.ents)
+        if (std::memcmp(&e.pb, &pbot, sizeof(double)) == 0 && std::memcmp(&e.pt, &ptop, sizeof(double)) == 0 && e.w == weighted) return e.r;
+    WindVector r = mean_wind_pres_impl(prof, pbot, ptop, weighted);
+    if (m.ents.size() < 64) m.ents.push_back({pbot, ptop, weighted, r});
+    return r;
+}
+
+static WindVector mean_wind_pres_impl(const Profile& prof, double pbot, double ptop, bool weighted) {
     if (prof.empty() || !std::isfinite(pbot) || !std::isfinite(ptop) || pbot == MISSING || ptop == MISSING) return {};
     // np.arange(pbot, ptop+dp, dp), dp = -1
     long cnt = (long)std::ceil((pbot - ptop) + 1.0);

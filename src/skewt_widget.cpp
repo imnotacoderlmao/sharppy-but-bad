@@ -18,7 +18,7 @@ static QString i2s(double v) { return int2str(v); }                  // utils.IN
 static QString f2s(double v, int r) { return float2str(v, r); }      // utils.FLOAT2STR
 static inline double m2ft(double m) { return m * 3.2808399; }
 
-SkewTWidget::SkewTWidget(QWidget* parent) : CanvasBase(parent) {
+SkewTWidget::SkewTWidget(QWidget* parent) : QWidget(parent) {
     setMinimumSize(500, 500);
     setMouseTracking(true);
     initUI();

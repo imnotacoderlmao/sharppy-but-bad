@@ -25,7 +25,7 @@ static double lin(double h, const std::vector<double>& z, const std::vector<doub
     return std::nan("");
 }
 
-HodoWidget::HodoWidget(QWidget* parent) : CanvasBase(parent) {
+HodoWidget::HodoWidget(QWidget* parent) : QWidget(parent) {
     setMinimumSize(250, 250);
     setMouseTracking(true);
     initUI();
@@ -93,6 +93,26 @@ void HodoWidget::drawBackground(QPainter& qp) {
     qp.drawLine(QPointF(m_wid, 0), QPointF(m_wid, m_hgt));
     qp.drawLine(QPointF(m_wid, m_hgt), QPointF(0, m_hgt));
     qp.drawLine(QPointF(0, m_hgt), QPointF(0, 0));
+}
+
+// The rings/axes/frame only change on zoom, pan, resize or a colour/font/unit change, so they are rendered once into a
+// pixmap and blitted on every other repaint (live dragging repaints this widget on every mouse move).
+void HodoWidget::drawBackgroundCached(QPainter& qp) {
+    const qreal dpr = devicePixelRatioF();
+    QString key = QString("%1x%2@%3|%4,%5,%6|%7,%8,%9|%10|%11|%12|%13")
+        .arg(width()).arg(height()).arg(dpr).arg(m_centerx, 0, 'g', 17).arg(m_centery, 0, 'g', 17).arg(m_scale, 0, 'g', 17)
+        .arg(m_bg.rgba()).arg(m_fg.rgba()).arg(m_isotach.rgba()).arg(m_labelFont.toString()).arg(m_windUnits)
+        .arg(m_wid * 1000 + m_hgt).arg(m_ringInc);
+    for (int r : m_rings) key += QChar(',') + QString::number(r);
+    if (m_bgPix.isNull() || key != m_bgKey) {
+        m_bgPix = QPixmap(size() * dpr); m_bgPix.setDevicePixelRatio(dpr);
+        QPainter bp(&m_bgPix);
+        bp.setRenderHint(QPainter::Antialiasing); bp.setRenderHint(QPainter::TextAntialiasing);
+        drawBackground(bp);
+        bp.end();
+        m_bgKey = key;
+    }
+    qp.drawPixmap(0, 0, m_bgPix);
 }
 
 void HodoWidget::rebuildRings() {
@@ -360,7 +380,7 @@ void HodoWidget::paintContents(QPaintEvent*) {
     QPainter qp(this);
     qp.setRenderHint(QPainter::Antialiasing);
     qp.setRenderHint(QPainter::TextAntialiasing);
-    drawBackground(qp);
+    drawBackgroundCached(qp);
     if (!m_hasData) return;
 
     if (m_bndyDrawn) drawBoundary(qp);

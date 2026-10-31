@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QFont>
+#include <QPixmap>
 #include <QColor>
 #include <QString>
 #include "sharppy/profile.hpp"
@@ -61,6 +62,7 @@ private:
     int m_lpad = 5, m_rpad = 5;
     double m_tpad = 0, m_labelHeight = 0, m_barby = 0, m_ylast = 0;
     QFont m_labelFont;
+    QPixmap m_framePix; QString m_frameKey;   // cached static layer (background, border, labels)
 };
 
 } // namespace sharppy

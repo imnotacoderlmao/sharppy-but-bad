@@ -238,7 +238,17 @@ LPL define_fcst(const Env& e) {
     l.dwpc = temp_at_mixrat(mean_mixratio_exact(e, l.pres, l.pres - 100.), l.pres);
     return l;
 }
+static LPL define_mu_impl(const Env& e, double presval);
 LPL define_mu(const Env& e, double presval) {
+    // Several panels ask for the same most-unstable level per recompute; Env is immutable (gen is unique to it).
+    struct Ent { uint64_t gen; double pv; LPL l; };
+    thread_local Ent memo[4]; thread_local unsigned nxt = 0;
+    for (const Ent& m : memo) if (m.gen == e.gen && std::memcmp(&m.pv, &presval, sizeof(double)) == 0) return m.l;
+    LPL r = define_mu_impl(e, presval);
+    memo[nxt++ & 3] = {e.gen, presval, r};
+    return r;
+}
+LPL define_mu_impl(const Env& e, double presval) {
     LPL l; double pbot = e.sfc_pres, ptop = pbot - presval;
     l.pres = most_unstable_level(e, pbot, ptop);
     l.tmpc = e.temp_at(l.pres); l.dwpc = e.dwpt_at(l.pres);
@@ -327,7 +337,19 @@ void cape_only(const Env& e, double pres, double tmpc, double dwpc, double pbot,
     bplus = bp; bminus = bm;
 }
 
+static Parcel parcelx_impl(const Env& e, double pres, double tmpc, double dwpc, double pbot, double ptop);
+// Memoized per Env (immutable, unique gen): the surface/ML/MU parcels are lifted by the parcel table, the thermo
+// indices, fire, winds and the skew-T/hodo/slinky panels with identical arguments within one recompute.
 Parcel parcelx(const Env& e, double pres, double tmpc, double dwpc, double pbot, double ptop) {
+    struct Ent { uint64_t gen = 0; double a[5]; Parcel r; };
+    thread_local Ent memo[12]; thread_local unsigned nxt = 0;
+    const double a[5] = {pres, tmpc, dwpc, pbot, ptop};
+    for (const Ent& m : memo) if (m.gen == e.gen && std::memcmp(m.a, a, sizeof a) == 0) return m.r;
+    Ent& w = memo[nxt++ % 12];
+    w.gen = e.gen; std::memcpy(w.a, a, sizeof a); w.r = parcelx_impl(e, pres, tmpc, dwpc, pbot, ptop);
+    return w.r;
+}
+static Parcel parcelx_impl(const Env& e, double pres, double tmpc, double dwpc, double pbot, double ptop) {
     Parcel pcl; pcl.pres = pres; pcl.tmpc = tmpc; pcl.dwpc = dwpc;
     const size_t n = e.pres.size();
     if (n < 2 || isn(pres) || isn(tmpc) || isn(dwpc)) return pcl;

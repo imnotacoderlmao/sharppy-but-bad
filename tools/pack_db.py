@@ -3,7 +3,9 @@
 pack_db.py - pack the whole data/ tree (datasources, SARS analog soundings + tables, shapefiles, sharptab climatology)
 into ONE archive, so a repository holds a single file instead of thousands.
 
-    python pack_db.py pack   <data_dir> <out.dbpack>   # every file under data_dir (except *.dbpack / *.sarspack)
+    python pack_db.py pack   <data_dir> <out.dbpack> [--if-changed]   # every file under data_dir (except *.dbpack / *.sarspack)
+                                                                       # --if-changed: skip when out is newer than every input
+    python pack_db.py embed  <data_dir> <program>                      # append the archive to the executable itself (see below)
     python pack_db.py unpack <in.dbpack|in.sarspack> <out_dir>
     python pack_db.py list   <in.dbpack|in.sarspack>
     python pack_db.py verify <data_dir> <in.dbpack>
@@ -17,6 +19,10 @@ Format "DBPACK1" (big-endian), readable from C++ with QFile + qUncompress:
     u32      entry count N
     N x entry: u16 path length, path (UTF-8, '/' separated, relative to data/), u32 offset, u32 csize, u32 usize
     blobs back to back; each blob = u32(usize, big-endian) + zlib stream (exactly qCompress()'s layout).
+Embedding ("embed"): the archive is appended to the finished executable followed by a 16-byte trailer
+    8 bytes "DBPKEND1" + u64 archive length (big-endian)
+and the program reads it from its own file at start-up. Running `embed` again replaces a previous embedding, so it can be
+the last build step every time. Do it AFTER linking and after any strip/UPX/signing step (those drop or invalidate the tail).
 Deterministic (sorted, no timestamps, fixed level), so repacking unchanged data gives an identical file.
 `unpack`/`list` also understand the older SARSPK1 archives (hail/ -> sars/hail/, supercell/ -> sars/supercell/,
 datasources -> datasources/). Standard library only.
@@ -40,13 +46,29 @@ def collect(root):
     return out
 
 
-def pack(root, out):
+def up_to_date(entries, out):
+    """True when `out` exists, is newer than every input and lists exactly these files."""
+    if not os.path.isfile(out):
+        return False
+    t = os.path.getmtime(out)
+    if any(os.path.getmtime(p) > t for _, p in entries):
+        return False
+    try:
+        _, items = read_index(out)
+    except SystemExit:
+        return False
+    return {n for n, *_ in items} == {rel for rel, _ in entries}
+
+
+def build(root):
+    """Returns (archive bytes, meta list) for every file under root."""
     entries = collect(root)
     if not entries:
         sys.exit("no files found under %s" % root)
     blobs, meta = [], []
     for rel, p in entries:
-        raw = open(p, "rb").read()
+        with open(p, "rb") as f:
+            raw = f.read()
         blobs.append(struct.pack(">I", len(raw)) + zlib.compress(raw, 9))
         meta.append((rel.encode("utf-8"), len(blobs[-1]), len(raw)))
     index = 12 + sum(2 + len(m[0]) + 12 for m in meta)
@@ -55,15 +77,53 @@ def pack(root, out):
         head += struct.pack(">H", len(nb)) + nb + struct.pack(">III", off, cs, us)
         off += cs
     assert len(head) == index
+    return bytes(head) + b"".join(blobs), meta
+
+
+def pack(root, out, if_changed=False):
+    entries = collect(root)
+    if not entries:
+        sys.exit("no files found under %s" % root)
+    if if_changed and up_to_date(entries, out):
+        print("%s is up to date" % out)
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    blob_all, meta = build(root)
     with open(out, "wb") as f:
-        f.write(head)
-        for b in blobs:
-            f.write(b)
+        f.write(blob_all)
     print("packed %d files: %.1f MB -> %.1f MB  (%s)" % (len(meta), sum(m[2] for m in meta) / 1e6, os.path.getsize(out) / 1e6, out))
 
 
+TRAILER = b"DBPKEND1"
+
+
+def embed(root, exe):
+    """Append the archive to exe (replacing an earlier embedding)."""
+    if not os.path.isfile(exe):
+        sys.exit("%s not found" % exe)
+    blob_all, meta = build(root)
+    with open(exe, "r+b") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        if size >= 16:
+            f.seek(size - 16)
+            tail = f.read(16)
+            if tail[:8] == TRAILER:
+                old = struct.unpack(">Q", tail[8:])[0]
+                if old + 16 <= size:
+                    size -= old + 16
+        f.truncate(size)
+        f.seek(size)
+        f.write(blob_all + TRAILER + struct.pack(">Q", len(blob_all)))
+    print("embedded %d files (%.1f MB) into %s" % (len(meta), len(blob_all) / 1e6, exe))
+
+
 def read_index(path):
-    data = open(path, "rb").read()
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[-16:-8] == TRAILER:              # a program with an embedded archive
+        n = struct.unpack(">Q", data[-8:])[0]
+        data = data[len(data) - 16 - n:len(data) - 16]
     magic = data[:8]
     if magic not in (MAGIC, OLD):
         sys.exit("%s is not a DBPACK1/SARSPK1 archive" % path)
@@ -124,7 +184,8 @@ def verify(root, path):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if len(a) == 3 and a[0] == "pack": pack(a[1], a[2])
+    if len(a) in (3, 4) and a[0] == "pack": pack(a[1], a[2], len(a) == 4 and a[3] == "--if-changed")
+    elif len(a) == 3 and a[0] == "embed": embed(a[1], a[2])
     elif len(a) == 3 and a[0] == "unpack": unpack(a[1], a[2])
     elif len(a) == 2 and a[0] == "list": list_(a[1])
     elif len(a) == 3 and a[0] == "verify": verify(a[1], a[2])

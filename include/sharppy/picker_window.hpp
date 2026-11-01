@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "sharppy/data_fetcher.hpp"
+#include "sharppy/free_pick.hpp"
 #include "sharppy/datasource.hpp"
 #include "sharppy/map_widget.hpp"
 #include "sharppy/preferences_dialog.hpp"
@@ -72,6 +73,8 @@ private slots:
     void onSelectAll();
     void onMapClicked(const MapPoint& point);
     void onSelectionCleared();
+    void onPointPicked(double lat, double lon);
+    void onFreePickFinished(bool ok, const QStringList& texts, const QStringList& titles, const QString& error, const QString& warning);
     void onGenerate();
     void onFetchFinished(bool success, const QString& content, const QString& errorMsg, const QString& title);
 
@@ -92,6 +95,7 @@ private:
 
     // --- fetch state ---
     DataFetcher* m_fetcher = nullptr;
+    FreePickFetcher* m_free = nullptr;     // gridded sources: ERA5 (CDS) and model point queries
     QProgressDialog* m_progress = nullptr;
     bool m_busy = false;
     size_t m_tries = 0;

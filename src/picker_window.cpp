@@ -1,4 +1,6 @@
 #include "sharppy/picker_window.hpp"
+#include <QInputDialog>
+#include <QLineEdit>
 #include "sharppy/bufkit.hpp"
 #include "sharppy/spc.hpp"
 #include "sharppy/uwyo.hpp"
@@ -169,6 +171,9 @@ void PickerCalendar::paintCell(QPainter* painter, const QRect& rect, const QDate
 Picker::Picker(QWidget* parent) : QWidget(parent) {
     m_fetcher = new DataFetcher(this);
     connect(m_fetcher, &DataFetcher::fetchFinished, this, &Picker::onFetchFinished);
+    m_free = new FreePickFetcher(this);
+    connect(m_free, &FreePickFetcher::finished, this, &Picker::onFreePickFinished);
+    connect(m_free, &FreePickFetcher::status, this, [this](const QString& t) { if (m_progress && m_busy) m_progress->setLabelText(t); });
 
     initSources();
 
@@ -312,6 +317,7 @@ void Picker::initUI() {
     leftFrame->setMaximumWidth(280);
 
     connect(m_view, &MapWidget::stationClicked, this, &Picker::onMapClicked);
+    connect(m_view, &MapWidget::pointPicked, this, &Picker::onPointPicked);
     connect(m_view, &MapWidget::selectionCleared, this, &Picker::onSelectionCleared);
 
     refreshStations();
@@ -466,7 +472,7 @@ void Picker::updateRunDropdown(bool) {
     m_calDate = m_cal->selectedDate();
 
     // times = source.getAvailableTimes(dt=cal_date)
-    const QVector<QDateTime> times = s.availableTimes(m_calDate, now);
+    QVector<QDateTime> times = s.availableTimes(m_calDate, now);
 
     const DsTimeSpan span = s.calendarSpan(times, now);
     if (span.valid) {
@@ -474,6 +480,11 @@ void Picker::updateRunDropdown(bool) {
         m_cal->setEarliestAvailable(span.earliest);
     }
     m_calDate = m_cal->selectedDate();
+    if (s.freePick() && span.valid && m_calDate > span.latest) {   // gridded sources lag behind now: jump to the newest day with data
+        m_cal->setSelectedDate(span.latest);
+        m_calDate = m_cal->selectedDate();
+        times = s.availableTimes(m_calDate, now);
+    }
     m_cal->update();
 
     // Keep only the times of the selected day.
@@ -551,6 +562,7 @@ void Picker::updateList() {
 void Picker::onGetModel(int) {
     const int idx = m_ds.indexOf(m_modelDropdown->currentText());
     if (idx >= 0) m_sourceIdx = idx;
+    m_view->setFreePick(source().freePick());
     updateFromCal(true);
     m_runLabel->setEnabled(true);
     m_cal->setEnabled(true);
@@ -599,6 +611,16 @@ void Picker::onSelectionCleared() {
     m_button->setDisabled(true);
 }
 
+void Picker::onPointPicked(double lat, double lon) {
+    MapPoint p;
+    p.srcid = "pick"; p.lat = lat; p.lon = lon;
+    m_hasLoc = true;
+    m_loc = p;
+    m_dispName = QString("%1%2,%3%4").arg(lat >= 0 ? "N" : "S").arg(std::fabs(lat), 0, 'f', 2).arg(lon >= 0 ? "E" : "W").arg(std::fabs(lon), 0, 'f', 2);
+    m_button->setText(m_dispName + " | Generate Profiles");
+    if (m_hasConnection) m_button->setEnabled(true);
+}
+
 void Picker::onMapClicked(const MapPoint& point) {
     m_hasLoc = true;
     m_loc = point;
@@ -637,7 +659,15 @@ void Picker::onGenerate() {
     // Outlets that really have this station at this cycle, in the order they are tried
     // (DataSource._getOutletWithProfile).
     m_fetchStn = dsPointFromMap(m_loc);
-    m_outletOrder = source().outletsWithProfile(m_fetchStn, m_run, nowUtc(), listingPointers());
+    if (source().freePick()) {                  // any map point works: every provider outlet that serves this time
+        m_outletOrder.clear();
+        for (size_t i = 0; i < source().outlets.size(); ++i) {
+            const DsOutlet& o = source().outlets[i];
+            if (!o.provider.isEmpty() && o.availableTimes(m_run.date(), nowUtc()).contains(m_run)) m_outletOrder.push_back(int(i));
+        }
+    } else {
+        m_outletOrder = source().outletsWithProfile(m_fetchStn, m_run, nowUtc(), listingPointers());
+    }
 
     m_tries = 0;
     m_lastError.clear();
@@ -663,6 +693,7 @@ void Picker::startFetchAttempt() {
             if (!m_busy) return;
             m_busy = false;            // before cancel(): the abort emits fetchFinished(false)
             m_fetcher->cancel();
+            m_free->cancel();
             m_button->setEnabled(m_hasLoc && m_hasConnection);
         });
     }
@@ -675,6 +706,14 @@ void Picker::startFetchAttempt() {
     m_button->setDisabled(true);
 
     const DsOutlet& o = source().outlets[static_cast<size_t>(m_outletOrder[m_tries])];
+    if (!o.provider.isEmpty()) {
+        PickRequest rq;
+        rq.provider = o.provider; rq.model = o.modelId; rq.label = source().name.section(" (", 0, 0); rq.lat = m_loc.lat; rq.lon = m_loc.lon; rq.run = m_run;
+        for (int idx : m_profIdx) { const std::vector<int> hrs = source().forecastHours(); if (idx >= 0 && idx < int(hrs.size())) rq.hours.push_back(hrs[size_t(idx)]); }
+        if (rq.hours.isEmpty()) rq.hours.push_back(0);
+        m_free->start(rq);
+        return;
+    }
     const QString title = QString("%1 %2/%3Z (%4: %5)")
                               .arg(m_dispName, m_run.toString("yyyyMMdd"), m_run.toString("HH"), source().name, o.name);
     DsPoint stn = m_fetchStn;
@@ -744,6 +783,36 @@ void Picker::onFetchFinished(bool success, const QString& content, const QString
     emit profilesReady(outProfs, outTitles);
 }
 
+void Picker::onFreePickFinished(bool ok, const QStringList& texts, const QStringList& titles, const QString& error, const QString& warning) {
+    if (!m_busy) return;                       // cancelled
+    const QString outletName = source().outlets[static_cast<size_t>(m_outletOrder[m_tries])].name;
+    QVector<Profile> outProfs;
+    QStringList outTitles;
+    QString why = error;
+    if (ok) {
+        for (int i = 0; i < texts.size(); ++i) {
+            ParsedSounding ps;
+            if (!parseAll(texts[i].toStdString(), titles.value(i), ps) || ps.profiles.isEmpty()) continue;
+            Profile pr = ps.profiles.first();
+            pr.latitude = m_loc.lat;
+            pr.station_id = source().name.toStdString();
+            outProfs << pr;
+            outTitles << titles.value(i);
+        }
+        if (outProfs.isEmpty()) why = "the generated sounding could not be parsed";
+    }
+    if (outProfs.isEmpty()) {
+        m_lastError = why;
+        m_attemptLog << outletName + ": " + why;
+        ++m_tries;
+        startFetchAttempt();
+        return;
+    }
+    finishFetch();
+    if (!warning.isEmpty()) QMessageBox::information(this, "SHARPpy", warning);
+    emit profilesReady(outProfs, outTitles);
+}
+
 void Picker::finishFetch() {
     m_busy = false;
     if (m_progress) m_progress->hide();
@@ -788,6 +857,16 @@ void PickerWindow::createMenuBar() {
 
     QAction* pref = fileMenu->addAction("Preferences");
     connect(pref, &QAction::triggered, this, &PickerWindow::preferencesBox);
+
+    QMenu* setMenu = menuBar()->addMenu("Settings");
+    QAction* cds = setMenu->addAction("Set CDS token (ERA5)...");
+    connect(cds, &QAction::triggered, this, [this]() {
+        bool ok = false;
+        const QString t = QInputDialog::getText(this, "Copernicus CDS token",
+            "Personal access token from your profile page at cds.climate.copernicus.eu\n(also accept the ERA5 licence on the dataset page once).\nLeave empty to clear.",
+            QLineEdit::Password, FreePickFetcher::cdsToken(), &ok);
+        if (ok) FreePickFetcher::setCdsToken(t);
+    });
 
     QMenu* helpMenu = menuBar()->addMenu("Help");
     QAction* about = helpMenu->addAction("About");

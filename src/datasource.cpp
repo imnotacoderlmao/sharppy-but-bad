@@ -225,6 +225,21 @@ QVector<QDateTime> DsOutlet::archivedCycles(const QDateTime& start, int maxCycle
 
 QVector<QDateTime> DsOutlet::availableTimes(const QDate& dt, const QDateTime& nowUtc, int maxCycles) const {
     QVector<QDateTime> times;
+    if (!provider.isEmpty()) {
+        // Gridded free-pick source (ERA5, model point queries): every cycle of any day between start and now - delay.
+        QDate s, e;
+        if (!parseSpanDate(startAttr, nowUtc, s)) s = QDate(1940, 1, 1);
+        const QDateTime limit = nowUtc.addSecs(-static_cast<qint64>(delay) * 3600);
+        QDate lastDay = limit.date();
+        if (parseSpanDate(endAttr, nowUtc, e) && e < lastDay) lastDay = e;
+        const QDate day = dt.isValid() ? dt : lastDay;
+        if (day < s || day > lastDay) return times;
+        for (int h : cycles()) {
+            const QDateTime t = at(day, h);
+            if (t <= limit) times.append(t);
+        }
+        return times;
+    }
     const QString o = name.toLower();
     const QString d = dsName.toLower();
     bool useFallback = !customAvail();
@@ -366,6 +381,7 @@ DsTimeSpan DataSource::calendarSpan(const QVector<QDateTime>& times, const QDate
     for (const DsOutlet& o : outlets) {
         QDate s, e;
         o.timeSpan(nowUtc, s, e);
+        if (!o.provider.isEmpty() && e.isValid()) e = std::min(e, nowUtc.addSecs(-static_cast<qint64>(o.delay) * 3600).date());   // data lags by `delay`
         if (s.isValid() && e.isValid()) {
             r.earliest = s;
             r.latest = e;
@@ -417,6 +433,11 @@ std::vector<DsPoint> DataSource::availableAtTime(const std::vector<const QSet<QS
         }
     }
     return out;
+}
+
+bool DataSource::freePick() const {
+    for (const DsOutlet& o : outlets) if (!o.provider.isEmpty()) return true;
+    return false;
 }
 
 bool DataSource::supported() const {
@@ -542,6 +563,8 @@ DataSourceSet loadDataSources(const QString& dirIn) {
                     o.name = a.value("name").toString();
                     o.urlTemplate = a.value("url").toString();
                     o.format = a.value("format").toString();
+                    o.provider = a.value("provider").toString().toLower();
+                    o.modelId = a.value("model").toString();
                     cur.outlets.push_back(o);
                     curOutlet = &cur.outlets.back();
                 } else if (tag == "time" && curOutlet) {

@@ -44,6 +44,8 @@ public:
     QString urlTemplate;  // with {srcid} {cycle} {date} {year} {month} {day}
     QString format;       // "spc", "bufkit", "pecan", "nucaps"
     QString csvName;
+    QString provider;     // "era5" / "openmeteo": a free-pick outlet (any map point), no station list
+    QString modelId;      // provider specific model id (open-meteo "models=")
     int first = 0, range = 0, delta = 0, offset = 0, delay = 0, cycle = 24, archive = 0;
     QString startAttr = "-", endAttr = "-";
     DsPoints points;
@@ -84,6 +86,7 @@ public:
     std::vector<DsOutlet> outlets;
 
     std::vector<int> forecastHours() const;   // union over outlets, sorted
+    bool freePick() const;                    // some outlet takes any map point (provider=...)
     bool hasForecast() const;                 // forecastHours() != [0]
 
     // Union of every outlet's times for the day `dt` (invalid QDate = "latest"), sorted.

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<!-- Free-pick sources: click any point on the map. provider="era5" needs a Copernicus CDS token (Settings menu). -->
+<sourcelist>
+    <datasource name="Reanalysis" ensemble="false" observed="true">
+        <outlet name="ERA5" provider="era5" url="" format="spc" >
+            <time first="0" range="0" delta="0" offset="0" delay="120" cycle="1" archive="168" start="1940/01/01" end="now"/>
+        </outlet>
+    </datasource>
+</sourcelist>

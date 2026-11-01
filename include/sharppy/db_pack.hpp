@@ -10,7 +10,8 @@
 
 namespace sharppy {
 
-// Locates the archive: SHARPPY_DBPACK, data/data.dbpack next to / above the program, the working directory,
+// Locates the archive: SHARPPY_DBPACK, the archive embedded in the executable itself (returned as "embedded:"; see
+// tools/pack_db.py embed), data/data.dbpack next to / above the program, the working directory,
 // ~/.sharppy, then the legacy data/sars/sars.sarspack. Empty when there is none.
 QString dbpack_find();
 

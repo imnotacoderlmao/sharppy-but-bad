@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<!-- Models for any map point (Open-Meteo gridded point API, no key). model= is the Open-Meteo "models" id; edit it here if the
+     service renames one. The time shown is a valid time: the service returns the newest model run covering it. -->
+<sourcelist>
+    <datasource name="GFS" ensemble="false" observed="false">
+        <outlet name="Open-Meteo" provider="openmeteo" model="ncep_gfs_seamless" url="" format="spc" >
+            <time first="0" range="120" delta="3" offset="0" delay="5" cycle="6" archive="24" start="2022/01/01" end="now"/>
+        </outlet>
+    </datasource>
+    <datasource name="HRRR" ensemble="false" observed="false">
+        <outlet name="Open-Meteo" provider="openmeteo" model="ncep_hrrr_conus" url="" format="spc" >
+            <time first="0" range="18" delta="1" offset="0" delay="2" cycle="1" archive="24" start="2022/01/01" end="now"/>
+        </outlet>
+    </datasource>
+    <datasource name="NAM" ensemble="false" observed="false">
+        <outlet name="Open-Meteo" provider="openmeteo" model="ncep_nam_conus" url="" format="spc" >
+            <time first="0" range="60" delta="3" offset="0" delay="4" cycle="6" archive="24" start="2022/01/01" end="now"/>
+        </outlet>
+    </datasource>
+    <datasource name="ICON" ensemble="false" observed="false">
+        <outlet name="Open-Meteo" provider="openmeteo" model="icon_seamless" url="" format="spc" >
+            <time first="0" range="120" delta="3" offset="0" delay="5" cycle="6" archive="24" start="2022/01/01" end="now"/>
+        </outlet>
+    </datasource>
+    <datasource name="ECMWF IFS" ensemble="false" observed="false">
+        <outlet name="Open-Meteo" provider="openmeteo" model="ecmwf_ifs025" url="" format="spc" >
+            <time first="0" range="144" delta="3" offset="0" delay="7" cycle="6" archive="24" start="2022/01/01" end="now"/>
+        </outlet>
+    </datasource>
+</sourcelist>

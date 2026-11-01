@@ -12,6 +12,22 @@
 namespace sharppy {
 
 namespace {
+// A program made by `pack_db.py embed` carries the archive at the end of its own file: [archive]["DBPKEND1"][u64 length].
+constexpr const char* kEmbedded = "embedded:";
+QByteArray readEmbedded() {
+    QFile f(QCoreApplication::applicationFilePath());
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    const qint64 size = f.size();
+    if (size < 16 || !f.seek(size - 16)) return {};
+    const QByteArray tail = f.read(16);
+    if (tail.size() != 16 || tail.left(8) != QByteArray("DBPKEND1", 8)) return {};
+    const quint64 len = qFromBigEndian<quint64>(reinterpret_cast<const uchar*>(tail.constData()) + 8);
+    if (len == 0 || len + 16 > quint64(size) || len > 0x7fffffffULL) return {};
+    if (!f.seek(size - 16 - qint64(len))) return {};
+    const QByteArray d = f.read(qint64(len));
+    return quint64(d.size()) == len ? d : QByteArray();
+}
+
 struct Entry { QString path; quint32 off, csize, usize; };
 
 struct Archive {
@@ -28,9 +44,8 @@ struct Archive {
     bool open(const QString& p) {
         if (ok && file == p) return true;
         ok = false; entries.clear(); index.clear(); data.clear(); file = p;
-        QFile f(p);
-        if (!f.open(QIODevice::ReadOnly)) return false;
-        data = f.readAll();
+        if (p == kEmbedded) data = readEmbedded();
+        else { QFile f(p); if (!f.open(QIODevice::ReadOnly)) return false; data = f.readAll(); }
         const uchar* d = reinterpret_cast<const uchar*>(data.constData());
         const int n = data.size();
         const bool legacy = data.left(8) == QByteArray("SARSPK1\0", 8);
@@ -85,7 +100,8 @@ QString dbpack_find() {
     done = true;
     QStringList c;
     const QString env = qEnvironmentVariable("SHARPPY_DBPACK");
-    if (!env.isEmpty()) c << env;
+    if (!env.isEmpty() && QFileInfo::exists(env)) { found = QDir::cleanPath(env); return found; }
+    if (!readEmbedded().isEmpty()) { found = kEmbedded; return found; }       // self-contained build
     for (const QString& r : dataRoots()) c << r + "/data.dbpack";
     c << QDir::homePath() + "/.sharppy/data.dbpack";
     for (const QString& r : dataRoots()) c << r + "/sars/sars.sarspack";     // legacy

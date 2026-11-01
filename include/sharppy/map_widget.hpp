@@ -56,10 +56,14 @@ public:
     void saveProjection();
     void hasInternet(bool has_connection);
     QString selectedStation() const { return m_clickedStn; }
+    // Free-pick mode: a click (not a drag) anywhere on the map picks that latitude/longitude instead of a station.
+    void setFreePick(bool on);
+    bool freePick() const { return m_freePick; }
 
 signals:
     void stationClicked(const MapPoint& point);
     void selectionCleared();
+    void pointPicked(double lat, double lon);
 
 protected:
     void paintEvent(QPaintEvent* e) override;
@@ -69,6 +73,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void leaveEvent(QEvent* e) override;
     void wheelEvent(QWheelEvent* e) override;
 
 private:
@@ -98,6 +103,9 @@ private:
     std::vector<std::string> m_stnIds;
     QStringList m_stnNames;
     QString m_clickedStn;
+    bool m_freePick = false, m_hasPick = false, m_cursorIn = false;
+    QPoint m_cursor;                                   // free-pick crosshair position
+    double m_pickLat = 0.0, m_pickLon = 0.0;
 
     QLabel* m_stnReadout = nullptr;
     QLabel* m_loadReadout = nullptr;

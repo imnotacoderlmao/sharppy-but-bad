@@ -184,9 +184,22 @@ void MapWidget::initMap() {
     m_grid = m_mapper.coordPaths();
 }
 
-void MapWidget::setStations(const std::vector<MapPoint>& points) {
+void MapWidget::setFreePick(bool on) {
+    if (m_freePick == on) return;
+    m_freePick = on;
+    m_hasPick = false;
+    m_cursorIn = false;
     m_clickedStn.clear();
     emit selectionCleared();
+    drawMap();
+    update();
+}
+
+void MapWidget::setStations(const std::vector<MapPoint>& points) {
+    if (!m_freePick) {                     // a picked point survives the station refreshes (there are none to show)
+        m_clickedStn.clear();
+        emit selectionCleared();
+    }
 
     m_points = points;
     m_stnLats.clear();
@@ -347,6 +360,18 @@ void MapWidget::drawStations(QPainter& qp) {
         }
     }
 
+    if (m_freePick && m_hasPick) {
+        const QPointF p = m_mapper.toXY(m_pickLat, m_pickLon + m_mapRot);
+        if (inWindow(p)) {
+            const double r = 5.0 * m_scale;
+            qp.setPen(QPen(Qt::green, 1.5 * m_scale));
+            qp.setBrush(Qt::NoBrush);
+            qp.drawEllipse(p, r, r);
+            qp.drawLine(QPointF(p.x() - 2 * r, p.y()), QPointF(p.x() + 2 * r, p.y()));
+            qp.drawLine(QPointF(p.x(), p.y() - 2 * r), QPointF(p.x(), p.y() + 2 * r));
+        }
+    }
+
     if (haveClicked && lb <= clickedLat && clickedLat <= ub && inWindow(clickedPt)) {
         qp.setPen(QPen(Qt::green, m_scale));
         qp.setBrush(QBrush(Qt::green));
@@ -360,6 +385,16 @@ void MapWidget::paintEvent(QPaintEvent*) {
     const int dx = int(std::lround(m_transX - m_drawnTransX)), dy = int(std::lround(m_transY - m_drawnTransY));
     if (dx || dy) qp.fillRect(rect(), Qt::black);
     qp.drawPixmap(dx, dy, m_plotBitMap);
+    if (m_freePick && m_cursorIn && !m_hasDrag) {            // crosshair that follows the mouse before the point is clicked
+        qp.setPen(QPen(QColor(255, 255, 255, 200), 1));
+        qp.drawLine(m_cursor.x(), 0, m_cursor.x(), height());
+        qp.drawLine(0, m_cursor.y(), width(), m_cursor.y());
+    }
+}
+
+void MapWidget::leaveEvent(QEvent* e) {
+    QWidget::leaveEvent(e);
+    if (m_cursorIn) { m_cursorIn = false; update(); }
 }
 
 void MapWidget::resizeEvent(QResizeEvent* e) {
@@ -437,6 +472,7 @@ void MapWidget::mouseMoveEvent(QMouseEvent* e) {
         update();                                   // paintEvent slides the cached pixmap; no full redraw per mouse move
         return;                                     // hover / readout resume when the drag ends
     }
+    if (m_freePick) { m_cursor = pos; m_cursorIn = true; update(); }   // the crosshair is painted over the cached map
     checkStations(pos);
 
     bool invertible = false;
@@ -463,7 +499,26 @@ void MapWidget::mouseReleaseEvent(QMouseEvent* e) {
     m_transX = m_transY = 0.0;
     if (moved) { drawMap(); update(); }            // one real redraw at the final position
 
-    if (!m_dragging && !m_stnLats.empty()) {
+    if (!m_dragging && m_freePick) {
+        bool invertible = false;
+        const QTransform inv = m_transform.inverted(&invertible);
+        if (invertible) {
+            const QPointF m = inv.map(QPointF(pos));
+            double lat, lon;
+            m_mapper.toLatLon(m.x(), m.y(), lat, lon);
+            lon -= m_mapRot;
+            if (lon > 180) lon -= 360.0;
+            else if (lon <= -180) lon += 360.0;
+            double lb, ub;
+            m_mapper.latBounds(lb, ub);
+            if (std::isfinite(lat) && std::isfinite(lon) && std::fabs(lat) <= 90.0) {
+                m_hasPick = true; m_pickLat = lat; m_pickLon = lon;
+                emit pointPicked(lat, lon);
+                drawMap();
+                update();
+            }
+        }
+    } else if (!m_dragging && !m_stnLats.empty()) {
         int idx;
         double dist;
         nearestStation(pos, idx, dist);
